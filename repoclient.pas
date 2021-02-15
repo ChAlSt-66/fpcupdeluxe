@@ -34,7 +34,7 @@ unit repoclient;
 interface
 
 uses
-  Classes, SysUtils, processutils;
+  Classes, SysUtils;
 
 const
   // Custom return codes; note: keep separate from ProcessEx return codes (processutils.PROC_INTERNALERROR=-1)
@@ -51,30 +51,32 @@ type
   { TRepoClient }
 
   TRepoClient = class(TObject)
-  protected
+  private
+    FParent:TObject;
+    FRepositoryURL: string;
+    FLocalRepository: string;
     FDesiredRevision: string;
     FDesiredBranch: string;
     FHTTPProxyHost: string;
     FHTTPProxyPassword: string;
     FHTTPProxyPort: integer;
     FHTTPProxyUser: string;
-    FLocalRepository: string;
+    FModuleName: string;
+    FVerbose: boolean;
+    FExportOnly: boolean;
+    FForceLocal: boolean;
+  protected
     FLocalRevision: string;
     FRepoExecutable: string;
     FRepoExecutableName: string;
-    FRepositoryURL: string;
     FReturnCode: integer;
     FReturnOutput: string;
-    FVerbose: boolean;
-    FModuleName: string;
-    FExportOnly: boolean;
-    FForceLocal: boolean;
+    // Makes sure non-empty strings have a / at the end.
+    function IncludeTrailingSlash(AValue: string): string;
     //Performs a checkout/initial download
     //Note: it's often easier to call CheckOutOrUpdate
     procedure CheckOut(UseForce:boolean=false); virtual;
     function GetLocalRevision: string; virtual;
-    // Makes sure non-empty strings have a / at the end.
-    function IncludeTrailingSlash(AValue: string): string; virtual;
     procedure SetDesiredRevision(AValue: string); virtual;
     procedure SetDesiredBranch(AValue: string); virtual;
     procedure SetLocalRepository(AValue: string); virtual;
@@ -91,15 +93,13 @@ type
     //Note: it's often easier to call CheckOutOrUpdate; that also has some more network error recovery built in
     procedure Update; virtual;
   public
+    property Parent:TObject read FParent;
     // Downloads from remote repo: runs checkout if local repository doesn't exist, else does an update
     procedure CheckOutOrUpdate; virtual;
     // Downloads only the whole tree from remote repo ... do not include .svn or .git
     procedure ExportRepo; virtual;
     // Commits local changes to local and remote repository
     function Commit(Message: string): boolean; virtual;
-    // Executes command and returns result code
-    // Note: caller is responsible for quoting: to do: find out again in processutils what rules apply?!?
-    function Execute(Command: string): integer; virtual;
     // Creates diff of all changes in the local directory versus the remote version
     function GetDiffAll: string; virtual;
     // Shows commit log for local directory
@@ -123,7 +123,7 @@ type
     // If using http transport, an http proxy can be used. Proxy password (optional)
     property HTTPProxyPassword: string read FHTTPProxyPassword write FHTTPProxyPassword;
     // Shows list of files that have been modified locally (and not committed)
-    procedure LocalModifications(var FileList: TStringList); virtual;
+    procedure LocalModifications({%H-}var FileList: TStringList); virtual;
     // Checks to see if local directory is a valid repository for the repository URL given (if any)
     function LocalRepositoryExists: boolean; virtual;
     // Local directory that has a repository/checkout.
@@ -146,7 +146,7 @@ type
     property ForceLocal: boolean read FForceLocal write FForceLocal;
     property ValidClient: boolean read GetValidClient;
     property RepoExecutableName: string read GetRepoExecutableName;
-    constructor Create;
+    constructor Create(aParent:TObject);
     destructor Destroy; override;
   end;
 
@@ -177,10 +177,8 @@ function TRepoClient.IncludeTrailingSlash(AValue: string): string;
 begin
   // Default: either empty string or / already there
   Result := AValue;
-  if (AValue <> '') and (RightStr(AValue, 1) <> '/') then
-  begin
-    Result := AValue + '/';
-  end;
+  if (Result <> '') and (Result[Length(Result)] <> '/') then
+    Result := Result + '/';
 end;
 
 procedure TRepoClient.SetDesiredRevision(AValue: string);
@@ -249,6 +247,11 @@ end;
 function TRepoClient.GetValidClient:boolean;
 begin
   result:=( (Length(FRepoExecutable)<>0) AND (FileExists(FRepoExecutable)) );
+  if (NOT result) then
+  begin
+    FindRepoExecutable;
+    result:=( (Length(FRepoExecutable)<>0) AND (FileExists(FRepoExecutable)) );
+  end;
 end;
 
 procedure TRepoClient.CheckOut(UseForce:boolean=false);
@@ -275,11 +278,6 @@ end;
 function TRepoClient.GetRepoExecutableName:string;
 begin
   raise Exception.Create('TRepoClient descendants must implement GetRepoExecutableName by themselves.');
-end;
-
-function TRepoClient.Execute(Command: string): integer;
-begin
-  result:=ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + ' '+Command, LocalRepository, Verbose);
 end;
 
 function TRepoClient.GetDiffAll: string;
@@ -328,9 +326,10 @@ begin
   raise Exception.Create('TRepoClient descendants must implement LocalRepositoryExists by themselves.');
 end;
 
-constructor TRepoClient.Create;
+constructor TRepoClient.Create(aParent:TObject);
 begin
   inherited Create;
+  FParent:=aParent;
   FLocalRepository := '';
   FRepositoryURL := '';
   FDesiredRevision := '';
@@ -339,7 +338,9 @@ begin
   FReturnOutput := '';
   FRepoExecutable := '';
   FForceLocal := False;
-  FindRepoExecutable;
+  FVerbose := True;
+  //FForceLocal := TInstaller(FParent).ForceLocal;
+  //FindRepoExecutable;
 end;
 
 destructor TRepoClient.Destroy;

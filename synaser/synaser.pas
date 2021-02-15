@@ -1,9 +1,9 @@
 {==============================================================================|
-| Project : Ararat Synapse                                       | 007.006.000 |
+| Project : Ararat Synapse                                       | 007.006.001 |
 |==============================================================================|
 | Content: Serial port support                                                 |
 |==============================================================================|
-| Copyright (c)2001-2015, Lukas Gebauer                                        |
+| Copyright (c)2001-2017, Lukas Gebauer                                        |
 | All rights reserved.                                                         |
 |                                                                              |
 | Redistribution and use in source and binary forms, with or without           |
@@ -33,7 +33,7 @@
 | DAMAGE.                                                                      |
 |==============================================================================|
 | The Initial Developer of the Original Code is Lukas Gebauer (Czech Republic).|
-| Portions created by Lukas Gebauer are Copyright (c)2001-2015.                |
+| Portions created by Lukas Gebauer are Copyright (c)2001-2017.                |
 | All Rights Reserved.                                                         |
 |==============================================================================|
 | Contributor(s):                                                              |
@@ -842,9 +842,9 @@ end;
 procedure TBlockSerial.GetComNr(Value: string);
 begin
   FComNr := PortIsClosed;
-  if pos('COM', uppercase(Value)) = 1 then
+  if Pos('COM', uppercase(Value)) = 1 then
     FComNr := StrToIntdef(copy(Value, 4, Length(Value) - 3), PortIsClosed + 1) - 1;
-  if pos('/DEV/TTYS', uppercase(Value)) = 1 then
+  if Pos('/DEV/TTYS', uppercase(Value)) = 1 then
     FComNr := StrToIntdef(copy(Value, 10, Length(Value) - 9), PortIsClosed - 1);
 end;
 
@@ -1336,7 +1336,7 @@ begin
       end
       else
       begin
-        x := pos(Terminator, s);
+        x := Pos(Terminator, s);
         tl := l;
       end;
     if (FMaxLineLength <> 0) and (system.Length(s) > FMaxLineLength) then
@@ -2308,7 +2308,7 @@ begin
     reg.OpenKey('\HARDWARE\DEVICEMAP\SERIALCOMM', false);
     reg.GetValueNames(l);
     for n := 0 to l.Count - 1 do
-      v.Add(reg.ReadString(l[n]));
+      v.Add(PChar(reg.ReadString(l[n])));
     Result := v.CommaText;
   finally
     reg.Free;

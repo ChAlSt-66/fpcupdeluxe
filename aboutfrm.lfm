@@ -5,12 +5,12 @@ object AboutForm: TAboutForm
   Width = 460
   ActiveControl = Notebook
   BorderIcons = [biSystemMenu, biMaximize]
-  Caption = 'About Lazarus'
+  Caption = 'About fpcupdeluxe'
   ClientHeight = 376
   ClientWidth = 460
   OnCreate = AboutFormCreate
   Position = poScreenCenter
-  LCLVersion = '1.7'
+  LCLVersion = '2.1.0.0'
   object Notebook: TPageControl
     Left = 0
     Height = 326
@@ -41,16 +41,13 @@ object AboutForm: TAboutForm
         AnchorSideTop.Side = asrBottom
         AnchorSideBottom.Control = LogoImage
         AnchorSideBottom.Side = asrBottom
-        Left = 199
+        Left = 201
         Height = 15
         Top = 186
-        Width = 54
+        Width = 51
         Alignment = taCenter
         Caption = 'Version #:'
-        Font.Color = clSilver
-        Font.Style = [fsBold]
         ParentColor = False
-        ParentFont = False
       end
       object BuildDateLabel: TLabel
         AnchorSideLeft.Control = LogoImage
@@ -64,9 +61,7 @@ object AboutForm: TAboutForm
         Alignment = taCenter
         BorderSpacing.Around = 6
         Caption = 'Date:'
-        Font.Color = clSilver
         ParentColor = False
-        ParentFont = False
       end
       object PlatformLabel: TLabel
         AnchorSideLeft.Control = LogoImage
@@ -78,9 +73,12 @@ object AboutForm: TAboutForm
         Width = 74
         BorderSpacing.Around = 6
         Caption = 'PlatformLabel'
-        Font.Color = clSilver
+        Font.Color = clBlue
         ParentColor = False
         ParentFont = False
+        OnMouseDown = LabelMouseDown
+        OnMouseEnter = LabelMouseEnter
+        OnMouseLeave = LabelMouseLeave
       end
       object FPCVersionLabel: TLabel
         AnchorSideLeft.Control = LogoImage
@@ -93,17 +91,15 @@ object AboutForm: TAboutForm
         Width = 102
         BorderSpacing.Around = 6
         Caption = 'FPCUPVersionLabel'
-        Font.Color = clSilver
         ParentColor = False
-        ParentFont = False
       end
     end
-    object AboutPage: TTabSheet
-      Caption = 'About'
+    object CreditsPage: TTabSheet
+      Caption = 'Credits'
       ClientHeight = 298
       ClientWidth = 452
       object OfficialLabel: TLabel
-        AnchorSideLeft.Control = AboutPage
+        AnchorSideLeft.Control = CreditsPage
         AnchorSideBottom.Control = DocumentationLabel
         Left = 6
         Height = 15
@@ -128,12 +124,12 @@ object AboutForm: TAboutForm
         Font.Color = clBlue
         ParentColor = False
         ParentFont = False
-        OnMouseDown = URLLabelMouseDown
-        OnMouseEnter = URLLabelMouseEnter
-        OnMouseLeave = URLLabelMouseLeave
+        OnMouseDown = LabelMouseDown
+        OnMouseEnter = LabelMouseEnter
+        OnMouseLeave = LabelMouseLeave
       end
       object DocumentationLabel: TLabel
-        AnchorSideLeft.Control = AboutPage
+        AnchorSideLeft.Control = CreditsPage
         AnchorSideBottom.Control = ForumLabel
         AnchorSideBottom.Side = asrBottom
         Left = 6
@@ -162,14 +158,14 @@ object AboutForm: TAboutForm
         Font.Color = clBlue
         ParentColor = False
         ParentFont = False
-        OnMouseDown = URLLabelMouseDown
-        OnMouseEnter = URLLabelMouseEnter
-        OnMouseLeave = URLLabelMouseLeave
+        OnMouseDown = LabelMouseDown
+        OnMouseEnter = LabelMouseEnter
+        OnMouseLeave = LabelMouseLeave
       end
       object AboutMemo: TMemo
-        AnchorSideLeft.Control = AboutPage
-        AnchorSideTop.Control = AboutPage
-        AnchorSideRight.Control = AboutPage
+        AnchorSideLeft.Control = CreditsPage
+        AnchorSideTop.Control = CreditsPage
+        AnchorSideRight.Control = CreditsPage
         AnchorSideRight.Side = asrBottom
         AnchorSideBottom.Control = OfficialLabel
         Left = 0
@@ -199,7 +195,7 @@ object AboutForm: TAboutForm
         TabOrder = 0
       end
       object ForumLabel: TLabel
-        AnchorSideLeft.Control = AboutPage
+        AnchorSideLeft.Control = CreditsPage
         AnchorSideBottom.Control = ReinierLabel
         AnchorSideBottom.Side = asrBottom
         Left = 6
@@ -228,13 +224,13 @@ object AboutForm: TAboutForm
         Font.Color = clBlue
         ParentColor = False
         ParentFont = False
-        OnMouseDown = URLLabelMouseDown
-        OnMouseEnter = URLLabelMouseEnter
-        OnMouseLeave = URLLabelMouseLeave
+        OnMouseDown = LabelMouseDown
+        OnMouseEnter = LabelMouseEnter
+        OnMouseLeave = LabelMouseLeave
       end
       object ReinierLabel: TLabel
-        AnchorSideLeft.Control = AboutPage
-        AnchorSideBottom.Control = AboutPage
+        AnchorSideLeft.Control = CreditsPage
+        AnchorSideBottom.Control = CreditsPage
         AnchorSideBottom.Side = asrBottom
         Left = 6
         Height = 15
@@ -248,7 +244,7 @@ object AboutForm: TAboutForm
       object ReinierURLLabel: TLabel
         AnchorSideLeft.Control = ReinierLabel
         AnchorSideLeft.Side = asrBottom
-        AnchorSideBottom.Control = AboutPage
+        AnchorSideBottom.Control = CreditsPage
         AnchorSideBottom.Side = asrBottom
         Left = 76
         Height = 15
@@ -260,9 +256,9 @@ object AboutForm: TAboutForm
         Font.Color = clBlue
         ParentColor = False
         ParentFont = False
-        OnMouseDown = URLLabelMouseDown
-        OnMouseEnter = URLLabelMouseEnter
-        OnMouseLeave = URLLabelMouseLeave
+        OnMouseDown = LabelMouseDown
+        OnMouseEnter = LabelMouseEnter
+        OnMouseLeave = LabelMouseLeave
       end
     end
   end
@@ -276,6 +272,7 @@ object AboutForm: TAboutForm
     ClientHeight = 50
     ClientWidth = 460
     TabOrder = 1
+    TabStop = True
     object CloseButton: TBitBtn
       AnchorSideLeft.Control = ButtonPanel
       AnchorSideLeft.Side = asrCenter

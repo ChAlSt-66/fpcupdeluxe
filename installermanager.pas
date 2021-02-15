@@ -38,20 +38,19 @@ this will disable writeln calls
 interface
 
 uses
-  Classes, SysUtils,installerCore,installerFpc,
+  Classes, SysUtils,
+  m_crossinstaller,
+  installerCore,
+  installerFpc,
   {$ifndef FPCONLY}
   installerLazarus,
   {$endif}
-  installerHelp, installerUniversal, fpcuputil, FileUtil
+  installerHelp, installerUniversal,
+  fpcuputil
   {$ifdef UNIX}
   ,dynlibs,Unix
   {$endif UNIX}
   ;
-
-// Get revision from our source code repository:
-// If you have a file not found error for revision.inc, please make sure you compile hgversion.pas before compiling this project.
-{$i revision.inc}
-//Contains RevisionStr and versiondate constants
 
 // These sequences determine standard installation/uninstallation order/content:
 // Note that a single os/cpu/sequence combination will only be executed once (the state machine checks for this)
@@ -90,13 +89,13 @@ Const
     {$endif mswindows}
 
     //default simple sequence: some packages give errors and memory is limited, so keep it simple
-    _DECLARE+_DEFAULT+'Simple'+_SEP+
+    _DECLARE+_DEFAULTSIMPLE+_SEP+
     {$ifndef FPCONLY}
     _EXECUTE+_CHECKDEVLIBS+_SEP+
     {$endif}
     _DO+_FPC+_SEP+
     {$ifndef FPCONLY}
-    _DO+'oldlazarus'+_SEP+
+    _DO+_LAZARUSSIMPLE+_SEP+
     {$endif}
     _END+
 
@@ -132,36 +131,39 @@ Const
     _DO+_DEFAULT+_UNINSTALL+_SEP+
     _END+
 
+
+//default install sequence for docker
+    _DECLARE+_DOCKER+_SEP+
+    _CLEANMODULE+_FPC+_SEP+
+    _CHECKMODULE+_FPC+_SEP+
+    _GETMODULE+_FPC+_SEP+
+    _BUILDMODULE+_FPC+_SEP+
+    {$ifndef FPCONLY}
+    _CLEANMODULE+_LAZBUILD+_SEP +
+    _CHECKMODULE+_LAZBUILD+_SEP +
+    _GETMODULE+_LAZBUILD+_SEP +
+    _CONFIGMODULE+_LAZBUILD+_SEP +
+    _BUILDMODULE+_LAZBUILD+_SEP +
+    {$endif}
+    _END+ //keyword End specifies the end of the sequence
+
 //default check sequence
     _DECLARE+_DEFAULT+_CHECK+_SEP+
     _CHECKMODULE+_FPC+_SEP+
     {$ifndef FPCONLY}
     _CHECKMODULE+_LAZARUS+_SEP+
     {$endif}
+    _END+
+
+    _DECLARE+_CREATESCRIPT+_SEP+
+    _EXECUTE+_CREATEFPCUPSCRIPT+_SEP+
+    {$ifndef FPCONLY}
+    _EXECUTE+_CREATELAZARUSSCRIPT+_SEP+
+    {$endif}
 
     _ENDFINAL;
 
 type
-  TCpu=(cpuNone,
-      i386,m68k,powerpc,sparc,x86_64,arm,powerpc64,avr,armeb,
-      mips,mipsel,jvm,i8086,aarch64
-    );
-  TOS=(osNone,
-      linux,go32v2,win32,os2,freebsd,beos,netbsd,
-      amiga,atari, solaris, qnx, netware, openbsd,wdosx,
-      palmos,macos,darwin,emx,watcom,morphos,netwlibc,
-      win64,wince,gba,nds,embedded,symbian,haiku,iphonesim,
-      aix,java,android,nativent,msdos,wii,aros,dragonfly,
-      win16
-    );
-
-  //TCPUBase = (i386,x86_64,arm,aarch64,powerpc,powerpc64,jvm,sparc,aix,mips,avr,m68k);
-  TCPUBaseSet = set of TCPU;
-  //TOSBase  = (windows,linux,android,darwin,freebsd,netbsd,ios,iphonesim,wince,java,embedded,dos,aros,haiku,go32,os2,solaris,amiga,atari);
-  TOSBaseSet = set of TOS;
-
-type
-
   TSequencer=class; //forward
 
   TResultCodes=(rMissingCrossLibs,rMissingCrossBins);
@@ -171,7 +173,6 @@ type
 
   TFPCupManager=class(TObject)
   private
-    FResultSet:TResultSet;
     FSVNExecutable: string;
     FHTTPProxyHost: string;
     FHTTPProxyPassword: string;
@@ -184,13 +185,13 @@ type
     FBootstrapCompilerDirectory: string;
     FClean: boolean;
     FConfigFile: string;
-    FCrossCPU_Target: string;
+    FCrossCPU_Target: TCPU;
     {$ifndef FPCONLY}
-    FCrossLCL_Platform: string; //really LCL widgetset
+    FLCL_Platform: string; //really LCL widgetset
     {$endif}
     FCrossOPT: string;
-    FCrossOS_Target: string;
-    FCrossOS_SubArch: string;
+    FCrossOS_Target: TOS;
+    FCrossOS_SubArch: TSUBARCH;
     FFPCDesiredRevision: string;
     FFPCDesiredBranch: string;
     FFPCSourceDirectory: string;
@@ -203,7 +204,8 @@ type
     {$ifndef FPCONLY}
     FLazarusDesiredRevision: string;
     FLazarusDesiredBranch: string;
-    FLazarusDirectory: string;
+    FLazarusSourceDirectory: string;
+    FLazarusInstallDirectory: string;
     FLazarusOPT: string;
     FLazarusPrimaryConfigPath: string;
     FLazarusURL: string;
@@ -216,6 +218,7 @@ type
     FReApplyLocalChanges: boolean;
     {$ifndef FPCONLY}
     FShortCutNameLazarus: string;
+    FContext: boolean;
     {$endif}
     FShortCutNameFpcup: string;
     FSkipModules: string;
@@ -228,15 +231,21 @@ type
     FUseWget: boolean;
     FExportOnly:boolean;
     FNoJobs:boolean;
+    FSoftFloat:boolean;
+    FOnlinePatching:boolean;
     FUseGitClient:boolean;
     FSwitchURL:boolean;
     FNativeFPCBootstrapCompiler:boolean;
     FForceLocalRepoClient:boolean;
     FSequencer: TSequencer;
+    FSolarisOI:boolean;
     FMUSL:boolean;
+    FRunInfo:string;
+    function GetCrossCombo_Target:string;
     {$ifndef FPCONLY}
     function GetLazarusPrimaryConfigPath: string;
-    procedure SetLazarusDirectory(AValue: string);
+    procedure SetLazarusSourceDirectory(AValue: string);
+    procedure SetLazarusInstallDirectory(AValue: string);
     procedure SetLazarusURL(AValue: string);
     {$endif}
     function GetLogFileName: string;
@@ -249,6 +258,9 @@ type
     procedure SetCrossLibraryDirectory(AValue: string);
     procedure SetLogFileName(AValue: string);
     procedure SetMakeDirectory(AValue: string);
+    function  GetTempDirectory:string;
+    function  GetRunInfo:string;
+    procedure SetRunInfo(aValue:string);
   protected
     FShortcutCreated:boolean;
     FLog:TLogger;
@@ -260,10 +272,10 @@ type
     procedure WritelnLog(EventType: TEventType;msg:string;ToConsole:boolean=true);overload;
  public
     property ShortcutCreated:boolean read FShortcutCreated;
-    property ResultSet: TResultSet read FResultSet;
     property Sequencer: TSequencer read FSequencer;
    {$ifndef FPCONLY}
     property ShortCutNameLazarus: string read FShortCutNameLazarus write FShortCutNameLazarus; //Name of the shortcut that points to the fpcup-installed Lazarus
+    property Context: boolean read FContext write FContext; //Name of the shortcut that points to the fpcup-installed Lazarus
     {$endif}
     property ShortCutNameFpcup:string read FShortCutNameFpcup write FShortCutNameFpcup; //Name of the shortcut that points to fpcup
     // Full path+filename of SVN executable. Use empty to search for default locations.
@@ -276,19 +288,22 @@ type
     property BaseDirectory: string read FBaseDirectory write SetBaseDirectory;
     // Directory where bootstrap compiler is installed/downloaded
     property BootstrapCompilerDirectory: string read FBootstrapCompilerDirectory write SetBootstrapCompilerDirectory;
+    property TempDirectory: string read GetTempDirectory;
     // Compiler override
     property CompilerOverride: string read FCompilerOverride write FCompilerOverride;
     property Clean: boolean read FClean write FClean;
     property ConfigFile: string read FConfigFile write FConfigFile;
-    property CrossCPU_Target:string read FCrossCPU_Target write FCrossCPU_Target;
+    property CrossCPU_Target:TCPU read FCrossCPU_Target write FCrossCPU_Target;
+    property CrossOS_Target:TOS read FCrossOS_Target write FCrossOS_Target;
+    property CrossOS_SubArch:TSUBARCH read FCrossOS_SubArch write FCrossOS_SubArch;
+    property CrossCombo_Target:string read GetCrossCombo_Target;
+
     // Widgetset for which the user wants to compile the LCL (not the IDE).
     // Empty if default LCL widgetset used for current platform
     {$ifndef FPCONLY}
-    property CrossLCL_Platform:string read FCrossLCL_Platform write FCrossLCL_Platform;
+    property LCL_Platform:string read FLCL_Platform write FLCL_Platform;
     {$endif}
     property CrossOPT:string read FCrossOPT write FCrossOPT;
-    property CrossOS_Target:string read FCrossOS_Target write FCrossOS_Target;
-    property CrossOS_SubArch:string read FCrossOS_SubArch write FCrossOS_SubArch;
     property CrossToolsDirectory:string read FCrossToolsDirectory write SetCrossToolsDirectory;
     property CrossLibraryDirectory:string read FCrossLibraryDirectory write SetCrossLibraryDirectory;
     property FPCSourceDirectory: string read FFPCSourceDirectory write SetFPCSourceDirectory;
@@ -304,7 +319,8 @@ type
     property KeepLocalChanges: boolean read FKeepLocalDiffs write FKeepLocalDiffs;
     property UseSystemFPC:boolean read FUseSystemFPC write FUseSystemFPC;
    {$ifndef FPCONLY}
-    property LazarusDirectory: string read FLazarusDirectory write SetLazarusDirectory;
+    property LazarusSourceDirectory: string read FLazarusSourceDirectory write SetLazarusSourceDirectory;
+    property LazarusInstallDirectory: string read FLazarusInstallDirectory write SetLazarusInstallDirectory;
     property LazarusPrimaryConfigPath: string read GetLazarusPrimaryConfigPath write FLazarusPrimaryConfigPath ;
     property LazarusURL: string read FLazarusURL write SetLazarusURL;
     property LazarusOPT:string read FLazarusOPT write FLazarusOPT;
@@ -324,7 +340,7 @@ type
     // List of modules that must be processed in addition to the default ones
     property IncludeModules:string read FIncludeModules write FIncludeModules;
     // Patch utility to use. Defaults to '(g)patch'
-    property PatchCmd:string read FPatchCmd write FPatchCmd;
+    property PatchCmd:string read FPatchCmd;
     // Whether or not to back up locale changes to .diff and reapply them before compiling
     property ReApplyLocalChanges: boolean read FReApplyLocalChanges write FReApplyLocalChanges;
     // List of modules that must not be processed
@@ -341,16 +357,20 @@ type
     property UseWget:boolean read FUseWget write FUseWget;
     property ExportOnly:boolean read FExportOnly write FExportOnly;
     property NoJobs:boolean read FNoJobs write FNoJobs;
+    property SoftFloat:boolean read FSoftFloat write FSoftFloat;
+    property OnlinePatching:boolean read FOnlinePatching write FOnlinePatching;
     property UseGitClient:boolean read FUseGitClient write FUseGitClient;
     property SwitchURL:boolean read FSwitchURL write FSwitchURL;
     property NativeFPCBootstrapCompiler:boolean read FNativeFPCBootstrapCompiler write FNativeFPCBootstrapCompiler;
     property ForceLocalRepoClient:boolean read FForceLocalRepoClient write FForceLocalRepoClient;
+    property SolarisOI:boolean read FSolarisOI write FSolarisOI;
     property MUSL:boolean read FMUSL write FMUSL;
-
+    property RunInfo:string read GetRunInfo write SetRunInfo;
     // Fill in ModulePublishedList and ModuleEnabledList and load other config elements
     function LoadFPCUPConfig:boolean;
     function CheckValidCPUOS: boolean;
     function ParseSubArchsFromSource: TStringList;
+
     // Stop talking. Do it! Returns success status
     function Run: boolean;
 
@@ -374,7 +394,7 @@ type
   TState=record
     instr:TKeyword;
     param:string;
-    end;
+  end;
 
   { TSequencer }
 
@@ -394,8 +414,8 @@ type
       function DoConfigModule(ModuleName:string):boolean;
       function DoExec(FunctionName:string):boolean;
       function DoGetModule(ModuleName:string):boolean;
-      function DoSetCPU(CPU:string):boolean;
-      function DoSetOS(OS:string):boolean;
+      function DoSetCPU(aCPU:string):boolean;
+      function DoSetOS(aOS:string):boolean;
       // Resets memory of executed steps so LCL widgetset can be rebuild
       // e.g. using different platform
       {$ifndef FPCONLY}
@@ -428,11 +448,13 @@ type
 implementation
 
 uses
-  strutils
-  {$ifdef linux}
-  ,processutils
-  {$endif}
-  ;
+  {$IFNDEF FPCONLY}
+  {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
+  InterfaceBase,
+  {$ENDIF}
+  {$ENDIF}
+  StrUtils,
+  processutils;
 
 { TFPCupManager }
 
@@ -466,6 +488,7 @@ end;
 procedure TFPCupManager.SetBaseDirectory(AValue: string);
 begin
   FBaseDirectory:=SafeExpandFileName(AValue);
+  ForceDirectoriesSafe(FBaseDirectory);
 end;
 
 procedure TFPCupManager.SetBootstrapCompilerDirectory(AValue: string);
@@ -487,7 +510,7 @@ end;
 procedure TFPCupManager.SetFPCURL(AValue: string);
 begin
   if FFPCURL=AValue then Exit;
-  if pos('://',AValue)>0 then
+  if Pos('://',AValue)>0 then
     FFPCURL:=AValue
   else
     FFPCURL:=installerUniversal.GetAlias('fpcURL',AValue);
@@ -507,15 +530,19 @@ begin
 end;
 
 {$ifndef FPCONLY}
-procedure TFPCupManager.SetLazarusDirectory(AValue: string);
+procedure TFPCupManager.SetLazarusSourceDirectory(AValue: string);
 begin
-  FLazarusDirectory:=SafeExpandFileName(AValue);
+  FLazarusSourceDirectory:=SafeExpandFileName(AValue);
+end;
+procedure TFPCupManager.SetLazarusInstallDirectory(AValue: string);
+begin
+  FLazarusInstallDirectory:=SafeExpandFileName(AValue);
 end;
 
 procedure TFPCupManager.SetLazarusURL(AValue: string);
 begin
   if FLazarusURL=AValue then Exit;
-  if pos('://',AValue)>0 then
+  if Pos('://',AValue)>0 then
     FLazarusURL:=AValue
   else
     FLazarusURL:=installerUniversal.GetAlias('lazURL',AValue);
@@ -546,18 +573,40 @@ begin
   FMakeDirectory:=SafeExpandFileName(AValue);
 end;
 
+function TFPCupManager.GetTempDirectory:string;
+begin
+  if DirectoryExists(FBaseDirectory) then
+  begin
+    result:=ConcatPaths([FBaseDirectory,'tmp']);
+    ForceDirectoriesSafe(result);
+  end;
+end;
+
 procedure TFPCupManager.WritelnLog(msg: string; ToConsole: boolean);
 begin
   // Set up log if it doesn't exist yet
-  FLog.WriteLog(msg,ToConsole);
+  FLog.WriteLog(msg);
+  if ToConsole then
+  begin
+    if Assigned(Sequencer.Installer) then
+      Sequencer.Installer.Infoln(msg)
+    else
+      ThreadLog(msg);
+  end;
 end;
 
 procedure TFPCupManager.WritelnLog(EventType: TEventType; msg: string; ToConsole: boolean);
 begin
   // Set up log if it doesn't exist yet
-  FLog.WriteLog(EventType,msg,ToConsole);
+  FLog.WriteLog(EventType,msg);
+  if ToConsole then
+  begin
+    if Assigned(Sequencer.Installer) then
+      Sequencer.Installer.Infoln(msg,EventType)
+    else
+      ThreadLog(msg,EventType);
+  end;
 end;
-
 
 function TFPCupManager.LoadFPCUPConfig: boolean;
 begin
@@ -636,7 +685,7 @@ begin
           sl.Delimiter:=',';
           sl.StrictDelimiter:=true;
           sl.DelimitedText:=sourceline;
-          cpuindex:=sl.IndexOf(CrossCPU_Target);
+          cpuindex:=sl.IndexOf(GetCPU(CrossCPU_Target));
         finally
           sl.Free;
         end;
@@ -677,7 +726,7 @@ begin
           sl.Delimiter:=',';
           sl.StrictDelimiter:=true;
           sl.DelimitedText:=sourceline;
-          osindex:=sl.IndexOf(CrossOS_Target);
+          osindex:=sl.IndexOf(GetOS(CrossOS_Target));
         finally
           sl.Free;
         end;
@@ -735,7 +784,7 @@ begin
 
     CloseFile(TxtFile);
 
-  end else infoln('Tried to get CPU OS combo from source, but failed.',etInfo);
+  end;
 end;
 
 
@@ -752,7 +801,7 @@ begin
   Result.Sorted := True;
   Result.Duplicates := dupIgnore;
 
-  s:=IncludeTrailingPathDelimiter(FPCSourceDirectory)+'rtl'+DirectorySeparator+'embedded'+DirectorySeparator+MAKEFILENAME;
+  s:=IncludeTrailingPathDelimiter(FPCSourceDirectory)+'rtl'+DirectorySeparator+GetOS(CrossOS_Target)+DirectorySeparator+FPCMAKEFILENAME;
 
   if FileExists(s) then
   begin
@@ -793,72 +842,62 @@ begin
 
     CloseFile(TxtFile);
 
-  end else infoln('Tried to get subarchs from '+MAKEFILENAME+', but no '+MAKEFILENAME+' found',etWarning);
+  end;
 end;
 
 
+function TFPCupManager.GetRunInfo:string;
+begin
+  result:=FRunInfo;
+  FRunInfo:='';
+end;
+
+procedure TFPCupManager.SetRunInfo(aValue:string);
+begin
+  if (Length(FRunInfo)>0) then
+    FRunInfo:=FRunInfo+LineEnding+aValue
+  else
+    FRunInfo:=aValue;
+end;
 
 
 function TFPCupManager.Run: boolean;
 var
   aSequence:string;
-  {$IFDEF MSWINDOWS}
-  Major:integer=0;
-  Minor:integer=0;
-  Build:integer=0;
-  {$ENDIF}
 begin
   result:=false;
+
+  FRunInfo:='';
 
   FShortcutCreated:=false;
 
   if
-    (lowercase(FSequencer.FParent.CrossCPU_Target)=GetTargetCPU)
+    (FSequencer.FParent.CrossCPU_Target=GetTCPU(GetTargetCPU))
     AND
-    (lowercase(FSequencer.FParent.CrossOS_Target)=GetTargetOS)
+    (FSequencer.FParent.CrossOS_Target=GetTOS(GetTargetOS))
   then
   begin
     //if (NOT FSequencer.FParent.MUSL) then
     {$ifdef Linux}
-    if (NOT (Self.MUSL AND (GetTargetOS='linux'))) then
+    if (NOT (Self.MUSL AND (GetTOS(GetTargetOS)=TOS.linux))) then
     {$endif}
     begin
-      infoln('No crosscompiling to own target !',etError);
-      infoln('Native [CPU-OS] version is already installed !!',etError);
+      RunInfo:='No crosscompiling to own target !';
+      RunInfo:='Native [CPU-OS] version is already installed !!';
       exit;
     end;
   end;
 
-  FResultSet:=[];
-
   try
-    WritelnLog(DateTimeToStr(now)+': '+BeginSnippet+' V'+RevisionStr+' ('+VersionDate+') started.',true);
+    WritelnLog(DateTimeToStr(now)+': '+BeginSnippet+' V'+RevisionStr+' ('+VersionDate+') started.',false);
+    WritelnLog('FPCUPdeluxe V'+DELUXEVERSION+' for '+GetTargetCPUOS+' running on '+GetDistro,false);
   except
     // Writing to log failed, probably duplicate run. Inform user and get out.
-    {$IFNDEF NOCONSOLE}
-    writeln('***ERROR***');
-    writeln('Could not open log file '+FLog.LogFile+' for writing.');
-    writeln('Perhaps another fpcup is running?');
-    writeln('Aborting.');
-    {$ENDIF}
-    halt(2);
+    RunInfo:='***ERROR***';
+    RunInfo:='Could not open log file '+FLog.LogFile+' for writing.';
+    RunInfo:='Perhaps another fpcup is running?';
+    exit;
   end;
-
-  infoln('InstallerManager: current sequence: '+LineEnding+
-    FSequencer.Text,etDebug);
-
-  // Some diagnostic info
-  {$IFDEF MSWINDOWS}
-  if Verbose then
-    if GetWin32Version(Major,Minor,Build) then
-    begin
-      infoln('Windows major version: '+IntToStr(Major),etInfo);
-      infoln('Windows minor version: '+IntToStr(Minor),etInfo);
-      infoln('Windows build number:  '+IntToStr(Build),etInfo);
-    end
-    else
-      infoln('Could not retrieve Windows version using GetWin32Version.',etWarning);
-  {$ENDIF}
 
   try
     if SkipModules<>'' then
@@ -878,42 +917,28 @@ begin
       aSequence:=_DEFAULT;
       {$ifdef win32}
       // Run Windows specific cross compiler or regular version
-      if pos(_CROSSWIN,SkipModules)=0 then aSequence:='Defaultwin32';
+      if Pos(_CROSSWIN,SkipModules)=0 then aSequence:=_DEFAULT+'win32';
       {$endif}
       {$ifdef win64}
       //not yet
-      //if pos(_CROSSWIN,SkipModules)=0 then aSequence:='Defaultwin64';
+      //if Pos(_CROSSWIN,SkipModules)=0 then aSequence:=_DEFAULT+'win64';
       {$endif}
-      {$ifdef CPUAARCH64}
-      aSequence:='DefaultSimple';
-      {$endif}
-      {$ifdef cpuarm}
-      aSequence:='DefaultSimple';
-      {$endif}
-      {$ifdef cpuarmhf}
-      aSequence:='DefaultSimple';
-      {$endif}
-      {$ifdef HAIKU}
-      aSequence:='DefaultSimple';
-      {$endif}
-      {$ifdef CPUPOWERPC64}
-      aSequence:='DefaultSimple';
-      {$endif}
+      {$IF defined(CPUAARCH64) or defined(CPUARM) or defined(CPUARMHF) or defined(HAIKU) or defined(CPUPOWERPC64)}
+      aSequence:=_DEFAULTSIMPLE;
+      {$ENDIF}
 
-      infoln('InstallerManager: going to run sequencer for sequence: '+aSequence,etDebug);
       result:=FSequencer.Run(aSequence);
 
       if (FIncludeModules<>'') and (result) then
       begin
         // run specified additional modules using the only mechanism
-        infoln('InstallerManager: going to run sequencer for include modules '+FIncludeModules,etDebug);
         FSequencer.CreateOnly(FIncludeModules);
         result:=FSequencer.Run(_ONLY);
       end;
     end;
-    //FResultSet:=FSequencer.FInstaller;
   finally
-    if assigned(FSequencer.FSkipList) then FreeAndNil(FSequencer.FSkipList);
+    if assigned(FSequencer.FSkipList) then FSequencer.FSkipList.Free;
+    FSequencer.FSkipList:=nil;
     FSequencer.DeleteOnly;
   end;
 end;
@@ -927,7 +952,14 @@ begin
   UseGitClient:=false;
   FNativeFPCBootstrapCompiler:=true;
   ForceLocalRepoClient:=false;
-  FPatchCmd:='patch';
+
+  FSoftFloat:=true;
+  FOnlinePatching:=false;
+  FSwitchURL:=false;
+  FSolarisOI:=false;
+  FMUSL:=false;
+
+  FPatchCmd:='patch'+GetExeExt;
 
   FModuleList:=TStringList.Create;
   FModuleEnabledList:=TStringList.Create;
@@ -940,20 +972,20 @@ end;
 destructor TFPCupManager.Destroy;
 var i:integer;
 begin
-  for i:=0 to FModuleList.Count-1 do
-    Freemem(FModuleList.Objects[i]);
+  for i:=0 to FModuleList.Count-1 do Freemem(FModuleList.Objects[i]);
   FModuleList.Free;
   FModulePublishedList.Free;
   FModuleEnabledList.Free;
   FSequencer.free;
-  try
-    WritelnLog(DateTimeToStr(now)+': fpcup finished.',true);
-    WritelnLog('------------------------------------------------',false);
-  finally
-    //ignore logging errors
-  end;
   FLog.Free;
   inherited Destroy;
+end;
+
+function TFPCupManager.GetCrossCombo_Target:string;
+begin
+  result:=GetCPU(FCrossCPU_Target)+'-'+GetOS(FCrossOS_Target);
+  if (FCrossOS_SubArch<>TSUBARCH.saNone) then
+    result:=result+'-'+GetSubarch(FCrossOS_SubArch);
 end;
 
 { TSequencer }
@@ -970,25 +1002,21 @@ end;
 
 function TSequencer.DoCheckModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoCheckModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.CheckModule(ModuleName);
 end;
 
 function TSequencer.DoBuildModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoBuildModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.BuildModule(ModuleName);
 end;
 
 function TSequencer.DoCleanModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoCleanModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.CleanModule(ModuleName);
 end;
 
 function TSequencer.DoConfigModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoConfigModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.ConfigModule(ModuleName);
 end;
 
@@ -1020,10 +1048,10 @@ function TSequencer.DoExec(FunctionName: string): boolean;
     result:=true;
     if FParent.ShortCutNameLazarus<>EmptyStr then
     begin
-      infoln('TSequencer.DoExec (Lazarus): creating desktop shortcut:',etInfo);
+      //Infoln('TSequencer.DoExec (Lazarus): creating desktop shortcut:',etInfo);
       try
         // Create shortcut; we don't care very much if it fails=>don't mess with OperationSucceeded
-        InstalledLazarus:=IncludeTrailingPathDelimiter(FParent.LazarusDirectory)+'lazarus'+GetExeExt;
+        InstalledLazarus:=IncludeTrailingPathDelimiter(FParent.LazarusInstallDirectory)+'lazarus'+GetExeExt;
         {$IFDEF MSWINDOWS}
         CreateDesktopShortCut(InstalledLazarus,'--pcp="'+FParent.LazarusPrimaryConfigPath+'"',FParent.ShortCutNameLazarus);
         {$ENDIF MSWINDOWS}
@@ -1034,12 +1062,12 @@ function TSequencer.DoExec(FunctionName: string): boolean;
         CreateHomeStartLink('"'+InstalledLazarus+'"','--pcp="'+FParent.LazarusPrimaryConfigPath+'"',FParent.ShortcutNameLazarus);
         {$ENDIF DARWIN}
         // Desktop shortcut creation will not always work. As a fallback, create the link in the home directory:
-        CreateDesktopShortCut(InstalledLazarus,'--pcp="'+FParent.LazarusPrimaryConfigPath+'"',FParent.ShortCutNameLazarus);
+        CreateDesktopShortCut(InstalledLazarus,'--pcp="'+FParent.LazarusPrimaryConfigPath+'"',FParent.ShortCutNameLazarus,FParent.Context);
         {$ENDIF UNIX}
         FParent.FShortcutCreated:=true;
       except
         // Ignore problems creating shortcut
-        infoln('CreateLazarusScript: Error creating shortcuts/links to Lazarus. Continuing.',etWarning);
+        //Infoln('CreateLazarusScript: Error creating shortcuts/links to Lazarus. Continuing.',etWarning);
       end;
     end;
   end;
@@ -1048,7 +1076,7 @@ function TSequencer.DoExec(FunctionName: string): boolean;
   result:=true;
   if FParent.ShortCutNameLazarus<>EmptyStr then
   begin
-    infoln('TSequencer.DoExec (Lazarus): deleting desktop shortcut:',etInfo);
+    //Infoln('TSequencer.DoExec (Lazarus): deleting desktop shortcut:',etInfo);
     try
       //Delete shortcut; we don't care very much if it fails=>don't mess with OperationSucceeded
       {$IFDEF MSWINDOWS}
@@ -1075,8 +1103,58 @@ function TSequencer.DoExec(FunctionName: string): boolean;
     end;
 
   const
+    DEBIAN_INSTALL_COMMAND='sudo apt-get install';
+
+    DEBIAN_LIBS : array [0..15] of string = (
+    'unrar',
+    'unzip',
+    'wget',
+    'make',
+    'gcc',
+    'build-essential',
+    //'openssl-dev',
+    'binutils',
+    'gdb',
+    'patch',
+    'subversion',
+    'git',
+    'libxtst-dev',
+    'libx11-dev',
+    'libgtk2.0-dev',
+    'libcairo2-dev',
+    'libcanberra-gtk-module'
+    );
+
+    DEBIAN_LIBS_32 : array [0..5] of string = (
+    'libc6-dev-i386',
+    'gcc-multilib',
+    'libxtst-dev:i386',
+    'libpango1-dev:i386',
+    'libgtk2.0-dev:i386',
+    'libcairo2-dev:i386'
+    );
+
+    DEBIAN_LIBS_QT5 : array [0..3] of string = (
+    'qt5-qmake',
+    'qtbase5-dev',
+    'qtbase5-dev-tools',
+    'libqt5x11extras5-dev'
+    );
+
+    //Mint
+    //'qt5-default'
+    //'libqt5x11extras5-dev'
+
+    //CentOS
+    //qt5-qtbase
+    //qt5-qtbase-devel
+    //qt5-qtx11extras
+    //qt5-qtx11extras-devel
+
+
     LCLLIBS:TLibList = ('libX11.so','libgdk_pixbuf-2.0.so','libpango-1.0.so','libcairo.so','libgdk-x11-2.0.so');
-    QTLIBS:TLibList = ('libQt5Pas.so','','','','');
+    QTLIBS:TLibList = ('libQt4Pas.so.1','','','','');
+    QT5LIBS:TLibList = ('libQt5Pas.so.1','','','','');
   var
     i:integer;
     pll:^TLibList;
@@ -1085,7 +1163,7 @@ function TSequencer.DoExec(FunctionName: string): boolean;
     AllOutput:TStringList;
     LS:array of LibSource;
 
-    function TestLib(LibName:string):boolean;
+    function TestLib(const LibName:string):boolean;
     var
       Lib : TLibHandle;
     begin
@@ -1101,6 +1179,8 @@ function TSequencer.DoExec(FunctionName: string): boolean;
 
   begin
     result:=true;
+
+    pll:=nil;
 
     // these libs are always needed !!
     AdvicedLibs:='make gdb binutils gcc unrar unzip patch wget subversion';
@@ -1148,7 +1228,17 @@ function TSequencer.DoExec(FunctionName: string): boolean;
       LS[11].lib:='libpangocairo-1.0.so';
       }
       //apt-get install subversion make binutils gdb gcc libgtk2.0-dev
-
+      {
+       libatk1.0
+       libc6
+       libcairo2
+       libgdk-pixbuf2.0
+       libglib2.0
+       libgtk2.0
+       libpango-1.0
+       libpangocairo-1.0
+       libx11
+      }
       Output:='libx11-dev libgtk2.0-dev libcairo2-dev libpango1.0-dev libxtst-dev libgdk-pixbuf2.0-dev libatk1.0-dev libghc-x11-dev';
       AdvicedLibs:=AdvicedLibs+
                    'make binutils build-essential gdb gcc subversion unrar devscripts libc6-dev freeglut3-dev libgl1-mesa libgl1-mesa-dev '+
@@ -1158,7 +1248,7 @@ function TSequencer.DoExec(FunctionName: string): boolean;
     else
     if (AnsiContainsText(Output,'rhel') OR AnsiContainsText(Output,'centos') OR AnsiContainsText(Output,'scientific') OR AnsiContainsText(Output,'fedora') OR AnsiContainsText(Output,'redhat'))  then
     begin
-      Output:='libx11-devel gtk2-devel gtk+extra gtk+-devel cairo-devel cairo-gobject-devel pango-devel';
+      Output:='libX11-devel libXtst libXtst-devel gtk2-devel gtk+extra gtk+-devel cairo-devel cairo-gobject-devel pango-devel';
     end
     else
     if AnsiContainsText(Output,'openbsd') then
@@ -1179,19 +1269,25 @@ function TSequencer.DoExec(FunctionName: string): boolean;
     end
     else Output:='the libraries to get libX11.so and libgdk_pixbuf-2.0.so and libpango-1.0.so and libgdk-x11-2.0.so, but also make and binutils';
 
-    if (LCLPlatform='') or (Uppercase(LCLPlatform)='GTK2') then
-      pll:=@LCLLIBS
-    else if Uppercase(LCLPlatform)='QT' then
-      pll:=@QTLIBS;
-    for i:=1 to LIBSCNT do
+    if Uppercase(LCLPlatform)='QT' then
+      pll:=@QTLIBS
+    else if Uppercase(LCLPlatform)='QT5' then
+      pll:=@QT5LIBS
+    else pll:=@LCLLIBS;
+
+    if Assigned(pll) then
     begin
-      if not TestLib(pll^[i]) then
+      for i:=1 to LIBSCNT do
       begin
-        if result=true then FParent.WritelnLog(etError,'Missing library:', true);
-        FParent.WritelnLog(etError, pll^[i], true);
-        result:=false;
+        if not TestLib(pll^[i]) then
+        begin
+          if result=true then FParent.WritelnLog(etError,'Missing library:', true);
+          FParent.WritelnLog(etError, pll^[i], true);
+          result:=false;
+        end;
       end;
     end;
+
     if (NOT result) AND (Length(Output)>0) then
     begin
       FParent.WritelnLog(etWarning,'You need to install at least '+Output+' to build Lazarus !!', true);
@@ -1209,8 +1305,9 @@ function TSequencer.DoExec(FunctionName: string): boolean;
   end;
   {$endif linux}
   {$endif}
+var
+  WidgetTypeName:string;
 begin
-  infoln('TSequencer: DoExec for function '+FunctionName+' called.',etDebug);
   if FunctionName=_CREATEFPCUPSCRIPT then
     result:=CreateFpcupScript
   {$ifndef FPCONLY}
@@ -1219,7 +1316,14 @@ begin
   else if FunctionName=_DELETELAZARUSSCRIPT then
     result:=DeleteLazarusScript
   else if FunctionName=_CHECKDEVLIBS then
-    result:=CheckDevLibs(FParent.CrossLCL_Platform)
+  begin
+    WidgetTypeName:=FParent.LCL_Platform;
+    {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
+    if (Length(WidgetTypeName)=0) then WidgetTypeName:=GetLCLWidgetTypeName;
+    {$ENDIF}
+    FParent.WritelnLog(etInfo,'Checking dev-libs for: '+WidgetTypeName, true);
+    result:=CheckDevLibs(WidgetTypeName);
+  end
   {$endif}
   else
   begin
@@ -1230,26 +1334,23 @@ end;
 
 function TSequencer.DoGetModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoGetModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.GetModule(ModuleName);
 end;
 
-function TSequencer.DoSetCPU(CPU: string): boolean;
+function TSequencer.DoSetCPU(aCPU: string): boolean;
 begin
-  infoln('TSequencer: DoSetCPU for CPU '+CPU+' called.',etDebug);
-  if LowerCase(CPU)=GetTargetCPU
-     then FParent.CrossCPU_Target:=''
-     else FParent.CrossCPU_Target:=CPU;
+  if aCPU=GetTargetCPU
+     then FParent.CrossCPU_Target:=TCPU.cpuNone
+     else FParent.CrossCPU_Target:=GetTCPU(aCPU);
   ResetAllExecuted;
   result:=true;
 end;
 
-function TSequencer.DoSetOS(OS: string): boolean;
+function TSequencer.DoSetOS(aOS: string): boolean;
 begin
-  infoln('TSequencer: DoSetOS for OS '+OS+' called.',etDebug);
-  if LowerCase(OS)=GetTargetOS
-     then FParent.CrossOS_Target:=''
-     else FParent.CrossOS_Target:=OS;
+  if aOS=GetTargetOS
+     then FParent.CrossOS_Target:=TOS.osNone
+     else FParent.CrossOS_Target:=GetTOS(aOS);
   ResetAllExecuted;
   result:=true;
 end;
@@ -1257,7 +1358,6 @@ end;
 {$ifndef FPCONLY}
 function TSequencer.DoResetLCL: boolean;
 begin
-  infoln('TSequencer: called DoReSetLCL',etDebug);
   ResetAllExecuted(true);
   result:=true;
 end;
@@ -1265,7 +1365,6 @@ end;
 
 function TSequencer.DoUnInstallModule(ModuleName: string): boolean;
 begin
-  infoln('TSequencer: DoUninstallModule for module '+ModuleName+' called.',etDebug);
   result:= GetInstaller(ModuleName) and FInstaller.UnInstallModule(ModuleName);
 end;
 
@@ -1275,14 +1374,21 @@ function TSequencer.GetInstaller(ModuleName: string): boolean;
 var
   CrossCompiling:boolean;
   aCompiler:string;
+  LocalFPCSourceDir:string;
 begin
   result:=true;
-  CrossCompiling:=(FParent.CrossCPU_Target<>'') or (FParent.CrossOS_Target<>'');
+
+  CrossCompiling:=(FParent.CrossCPU_Target<>TCPU.cpuNone) or (FParent.CrossOS_Target<>TOS.osNone);
+
+  if (Pos('github.com/ultibohub',FParent.FPCURL)>0) then
+    LocalFPCSourceDir:=IncludeTrailingPathDelimiter(FParent.FPCSourceDirectory)+'source'
+  else
+    LocalFPCSourceDir:=FParent.FPCSourceDirectory;
 
   //check if this is a known module:
 
   // FPC:
-  if (ModuleName=_FPC) then
+  if (ModuleName=_FPC) OR (ModuleName=_MAKEFILECHECKFPC) then
   begin
     if assigned(FInstaller) then
     begin
@@ -1290,8 +1396,8 @@ begin
       if (not CrossCompiling and (FInstaller is TFPCNativeInstaller)) or
         ( CrossCompiling and
         (FInstaller is TFPCCrossInstaller) and
-        (FInstaller.CrossOS_Target=FParent.CrossOS_Target) and
-        (FInstaller.CrossCPU_Target=FParent.CrossCPU_Target)
+        (TFPCCrossInstaller(FInstaller).CrossInstaller.TargetOS=FParent.CrossOS_Target) and
+        (TFPCCrossInstaller(FInstaller).CrossInstaller.TargetCPU=FParent.CrossCPU_Target)
         ) then
       begin
         exit; //all fine, continue with current FInstaller
@@ -1299,21 +1405,17 @@ begin
       else
         FInstaller.free; // get rid of old FInstaller
     end;
+
     if CrossCompiling then
-    begin
-      FInstaller:=TFPCCrossInstaller.Create;
-      FInstaller.SetTarget(FParent.CrossCPU_Target,FParent.CrossOS_Target,FParent.CrossOS_SubArch);
-      FInstaller.CrossOPT:=FParent.CrossOPT;
-      FInstaller.CrossLibraryDirectory:=FParent.CrossLibraryDirectory;
-      FInstaller.CrossToolsDirectory:=FParent.CrossToolsDirectory;
-    end
+      FInstaller:=TFPCCrossInstaller.Create
     else
       FInstaller:=TFPCNativeInstaller.Create;
 
-    FInstaller.SourceDirectory:=FParent.FPCSourceDirectory;
+    FInstaller.SourceDirectory:=LocalFPCSourceDir;
     FInstaller.InstallDirectory:=FParent.FPCInstallDirectory;
     (FInstaller as TFPCInstaller).BootstrapCompilerDirectory:=FParent.BootstrapCompilerDirectory;
     (FInstaller as TFPCInstaller).SourcePatches:=FParent.FPCPatches;
+    (FInstaller as TFPCInstaller).SoftFloat:=FParent.SoftFloat;
     if FParent.MUSL then
       (FInstaller as TFPCInstaller).NativeFPCBootstrapCompiler:=false
     else
@@ -1337,38 +1439,39 @@ begin
     or (ModuleName=_IDE)
     or (ModuleName=_BIGIDE)
     or (ModuleName=_USERIDE)
+    or (ModuleName=_INSTALLLAZARUS)
+    or (ModuleName=_MAKEFILECHECKLAZARUS)
   then
   begin
     if assigned(FInstaller) then
       begin
-      if (not crosscompiling and (FInstaller is TLazarusNativeInstaller)) or
-        (crosscompiling and (FInstaller is TLazarusCrossInstaller)) then
+      if (not CrossCompiling and (FInstaller is TLazarusNativeInstaller)) or
+        (CrossCompiling and (FInstaller is TLazarusCrossInstaller)) then
       begin
         exit; //all fine, continue with current FInstaller
       end
       else
         FInstaller.free; // get rid of old FInstaller
       end;
+
     if CrossCompiling then
-    begin
-      FInstaller:=TLazarusCrossInstaller.Create;
-      FInstaller.SetTarget(FParent.CrossCPU_Target,FParent.CrossOS_Target,FParent.CrossOS_SubArch);
-      FInstaller.CrossOPT:=FParent.CrossOPT;
-    end
+      FInstaller:=TLazarusCrossInstaller.Create
     else
       FInstaller:=TLazarusNativeInstaller.Create;
+
     // source- and install-dir are the same for Lazarus ... could be changed
-    FInstaller.SourceDirectory:=FParent.LazarusDirectory;
-    FInstaller.InstallDirectory:=FParent.LazarusDirectory;
+
+    FInstaller.SourceDirectory:=FParent.LazarusSourceDirectory;
+    FInstaller.InstallDirectory:=FParent.LazarusInstallDirectory;
 
     FInstaller.CompilerOptions:=FParent.LazarusOPT;
 
     FInstaller.DesiredRevision:=FParent.LazarusDesiredRevision;
     FInstaller.DesiredBranch:=FParent.LazarusDesiredBranch;
-    // CrossLCL_Platform is only used when building LCL, but the Lazarus module
+    // LCL_Platform is only used when building LCL, but the Lazarus module
     // will take care of that.
-    (FInstaller as TLazarusInstaller).CrossLCL_Platform:=FParent.CrossLCL_Platform;
-    (FInstaller as TLazarusInstaller).FPCSourceDir:=FParent.FPCSourceDirectory;
+    (FInstaller as TLazarusInstaller).LCL_Platform:=FParent.LCL_Platform;
+    (FInstaller as TLazarusInstaller).FPCSourceDir:=LocalFPCSourceDir;
     (FInstaller as TLazarusInstaller).FPCInstallDir:=FParent.FPCInstallDirectory;
     (FInstaller as TLazarusInstaller).PrimaryConfigPath:=FParent.LazarusPrimaryConfigPath;
     (FInstaller as TLazarusInstaller).SourcePatches:=FParent.FLazarusPatches;
@@ -1381,6 +1484,7 @@ begin
   else if ModuleName=_HELPFPC
   then
   begin
+    CrossCompiling:=false;
     if assigned(FInstaller) then
     begin
       if (FInstaller is THelpFPCInstaller) then
@@ -1391,12 +1495,13 @@ begin
         FInstaller.free; // get rid of old FInstaller
       end;
     FInstaller:=THelpFPCInstaller.Create;
-    FInstaller.SourceDirectory:=FParent.FPCSourceDirectory;
+    FInstaller.SourceDirectory:=LocalFPCSourceDir;
   end
   {$ifndef FPCONLY}
   else if ModuleName=_HELPLAZARUS
   then
   begin
+    CrossCompiling:=false;
     if assigned(FInstaller) then
     begin
       if (FInstaller is THelpLazarusInstaller) then
@@ -1407,19 +1512,19 @@ begin
         FInstaller.free; // get rid of old FInstaller
     end;
     FInstaller:=THelpLazarusInstaller.Create;
-    FInstaller.SourceDirectory:=FParent.LazarusDirectory;
-    // the same ... may change in the future
-    FInstaller.InstallDirectory:=FParent.LazarusDirectory;
+    FInstaller.SourceDirectory:=FParent.LazarusSourceDirectory;
+    FInstaller.InstallDirectory:=FParent.LazarusInstallDirectory;
     (FInstaller as THelpLazarusInstaller).FPCBinDirectory:=IncludeTrailingPathDelimiter(FParent.FPCInstallDirectory);
-    (FInstaller as THelpLazarusInstaller).FPCSourceDirectory:=IncludeTrailingPathDelimiter(FParent.FPCSourceDirectory);
+    (FInstaller as THelpLazarusInstaller).FPCSourceDirectory:=IncludeTrailingPathDelimiter(LocalFPCSourceDir);
     (FInstaller as THelpLazarusInstaller).LazarusPrimaryConfigPath:=FParent.LazarusPrimaryConfigPath;
   end
   {$endif}
   else       // this is a universal module
   begin
+      CrossCompiling:=false;
       if assigned(FInstaller) then
       begin
-        if (FInstaller is TUniversalInstaller) and
+        if (FInstaller.InheritsFrom(TUniversalInstaller)) and
           (FCurrentModule=ModuleName) then
         begin
           exit; //all fine, continue with current FInstaller
@@ -1427,27 +1532,37 @@ begin
         else
           FInstaller.free; // get rid of old FInstaller
       end;
-      FInstaller:=TUniversalInstaller.Create;
+
+      case ModuleName of
+        'awgg'          : FInstaller:=TAWGGInstaller.Create;
+        'mORMotPXL'     : FInstaller:=TmORMotPXLInstaller.Create;
+        'internettools' : FInstaller:=TInternetToolsInstaller.Create;
+        'pas2js-rtl'    :FInstaller:=TPas2jsInstaller.Create;
+      else
+        FInstaller:=TUniversalInstaller.Create;
+      end;
+
       FCurrentModule:=ModuleName;
       //assign properties
       (FInstaller as TUniversalInstaller).FPCInstallDir:=FParent.FPCInstallDirectory;
-      (FInstaller as TUniversalInstaller).FPCSourceDir:=FParent.FPCSourceDirectory;
+      (FInstaller as TUniversalInstaller).FPCSourceDir:=LocalFPCSourceDir;
       // Use compileroptions for chosen FPC compile options...
       FInstaller.CompilerOptions:=FParent.FPCOPT;
       // ... but more importantly, pass Lazarus compiler options needed for IDE rebuild
       {$ifndef FPCONLY}
-      (FInstaller as TUniversalInstaller).LazarusSourceDir:=FParent.FLazarusDirectory;
-      (FInstaller as TUniversalInstaller).LazarusInstallDir:=FParent.FLazarusDirectory;
+      (FInstaller as TUniversalInstaller).LazarusSourceDir:=FParent.FLazarusSourceDirectory;
+      (FInstaller as TUniversalInstaller).LazarusInstallDir:=FParent.FLazarusInstallDirectory;
       (FInstaller as TUniversalInstaller).LazarusCompilerOptions:=FParent.FLazarusOPT;
       (FInstaller as TUniversalInstaller).LazarusPrimaryConfigPath:=FParent.LazarusPrimaryConfigPath;
-      (FInstaller as TUniversalInstaller).LCL_Platform:=FParent.CrossLCL_Platform;
+      (FInstaller as TUniversalInstaller).LCL_Platform:=FParent.LCL_Platform;
       {$endif}
   end;
 
   if assigned(FInstaller) then
   begin
     FInstaller.BaseDirectory:=FParent.BaseDirectory;
-    FInstaller.SVNClient.RepoExecutable := FParent.SVNExecutable;
+    FInstaller.TempDirectory:=FParent.TempDirectory;
+    if (Length(FParent.SVNExecutable)>0) then FInstaller.SVNClient.RepoExecutable:=FParent.SVNExecutable;
     {$IFDEF MSWINDOWS}
     FInstaller.SVNClient.ForceLocal:=FParent.ForceLocalRepoClient;
     FInstaller.GitClient.ForceLocal:=FParent.ForceLocalRepoClient;
@@ -1459,7 +1574,7 @@ begin
     FInstaller.HTTPProxyPassword:=FParent.HTTPProxyPassword;
     FInstaller.KeepLocalChanges:=FParent.KeepLocalChanges;
     FInstaller.ReApplyLocalChanges:=FParent.ReApplyLocalChanges;
-    FInstaller.PatchCmd:=FParent.PatchCmd;
+    if Length(FParent.PatchCmd)>0 then FInstaller.PatchCmd:=FParent.PatchCmd;
     FInstaller.Verbose:=FParent.Verbose;
 
     aCompiler:='';
@@ -1483,12 +1598,30 @@ begin
     {$ENDIF}
     FInstaller.ExportOnly:=FParent.ExportOnly;
     FInstaller.NoJobs:=FParent.NoJobs;
+    FInstaller.OnlinePatching:=FParent.OnlinePatching;
     FInstaller.Log:=FParent.FLog;
-    {$IFDEF MSWINDOWS}
     FInstaller.MakeDirectory:=FParent.MakeDirectory;
-    {$ENDIF}
     FInstaller.SwitchURL:=FParent.SwitchURL;
-    if FParent.MUSL then FInstaller.MUSL:=true;
+    if FParent.SolarisOI then FInstaller.SolarisOI:=true {else if FInstaller.SolarisOI then FParent.SolarisOI:=true};
+    if FParent.MUSL then FInstaller.MUSL:=true {else if FInstaller.MUSL then FParent.MUSL:=true};
+
+    if CrossCompiling then
+    begin
+      // The below is used to get the right cross-installer !!
+      // By setting the target.
+      FInstaller.SetTarget(FParent.CrossCPU_Target,FParent.CrossOS_Target,FParent.CrossOS_SubArch);
+      FInstaller.CrossOPT:=FParent.CrossOPT;
+      if AnsiContainsText(FParent.CrossOPT,'-CAEABIHF') then
+        FInstaller.SetABI(TABI.eabihf)
+      else
+        if AnsiContainsText(FParent.CrossOPT,'-CAEABI') then
+          FInstaller.SetABI(TABI.eabi)
+      else
+        FInstaller.SetABI(TABI.default);
+      FInstaller.CrossLibraryDirectory:=FParent.CrossLibraryDirectory;
+      FInstaller.CrossToolsDirectory:=FParent.CrossToolsDirectory;
+    end
+
   end;
 end;
 
@@ -1690,23 +1823,15 @@ var
   idx:integer;
   SeqAttr:^TSequenceAttributes;
   localinfotext:string;
-
-  Procedure CleanUpInstaller;
-  begin
-    if assigned(FInstaller) then
-      begin
-      FInstaller.Free;
-      FInstaller:=nil;
-      end;
-  end;
-
 begin
+  result:=true;
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' ('+SequenceName+'): ';
   try
     if not assigned(FParent.FModuleList) then
     begin
       result:=false;
       FParent.WritelnLog(etError,localinfotext+'No sequences loaded while trying to find sequence name ' + SequenceName);
+      FParent.RunInfo:=localinfotext+'No sequences loaded while trying to find sequence name ' + SequenceName;
       exit;
     end;
     // --clean or --install ??
@@ -1729,12 +1854,11 @@ begin
       // Don't run sequence if already run
       case SeqAttr^.Executed of
         ESFailed : begin
-          infoln(localinfotext+'Already ran sequence name '+SequenceName+' ending in failure. Not running again.',etWarning);
+          FParent.RunInfo:=localinfotext+'Already ran sequence name '+SequenceName+' ending in failure. Not running again.';
           result:=false;
           exit;
           end;
         ESSucceeded : begin
-          infoln(localinfotext+'Already succesfully ran sequence name '+SequenceName+'. Not running again.',etInfo);
           exit;
           end;
         end;
@@ -1746,12 +1870,6 @@ begin
       // run sequence until end or failure
       while true do
       begin
-        //For debugging state machine sequence:
-        {$IFDEF DEBUG}
-        infoln(localinfotext+'State machine running sequence '+SequenceName,etDebug);
-        infoln(localinfotext+'State machine [instr]: '+GetEnumNameSimple(TypeInfo(TKeyword),Ord(FStateMachine[InstructionPointer].instr)),etDebug);
-        infoln(localinfotext+'State machine [param]: '+FStateMachine[InstructionPointer].param,etDebug);
-        {$ENDIF DEBUG}
         case FStateMachine[InstructionPointer].instr of
           SMdeclare     :;
           SMdeclareHidden :;
@@ -1761,7 +1879,6 @@ begin
           SMexec        : result:=DoExec(FStateMachine[InstructionPointer].param);
           SMend         : begin
                             SeqAttr^.Executed:=ESSucceeded;
-                            CleanUpInstaller;
                             exit; //success
                           end;
           SMcleanmodule : result:=DoCleanModule(FStateMachine[InstructionPointer].param);
@@ -1776,7 +1893,7 @@ begin
           SMSetOS       : DoSetOS(FStateMachine[InstructionPointer].param);
           SMSetCPU      : DoSetCPU(FStateMachine[InstructionPointer].param);
         end;
-        if not result then
+        if (NOT result) OR (SeqAttr^.Executed=ESFailed) then
         begin
           SeqAttr^.Executed:=ESFailed;
           {$IFDEF DEBUG}
@@ -1785,14 +1902,13 @@ begin
             '; line: '+IntTostr(InstructionPointer - EntryPoint+1)+
             ', param: '+FStateMachine[InstructionPointer].param);
           {$ENDIF DEBUG}
-          CleanUpInstaller;
+          FParent.RunInfo:=localinfotext+'Failure running '+BeginSnippet+' error executing sequence '+SequenceName;
           exit; //failure, bail out
         end;
         InstructionPointer:=InstructionPointer+1;
         if InstructionPointer>=length(FStateMachine) then  //somebody forgot end
         begin
           SeqAttr^.Executed:=ESSucceeded;
-          CleanUpInstaller;
           exit; //success
         end;
       end;
@@ -1801,28 +1917,38 @@ begin
     begin
       result:=false;  // sequence not found
       FParent.WritelnLog(localinfotext+'Failed to load sequence :' + SequenceName);
+      FParent.RunInfo:=localinfotext+'Failed to load sequence :' + SequenceName;
     end;
   finally
-    infoln(localinfotext+'Run ready.',etDebug);
+    if Assigned(FInstaller) then
+    begin
+      FInstaller.Destroy;
+      FInstaller:=nil;
+    end;
   end;
 end;
 
 function TSequencer.Kill: boolean;
+  var
+    idx:integer;
 begin
   result:=false;
-  if Assigned(Installer) then
+
+  if Assigned(Installer) AND Assigned(Installer.Processor) then
   begin
-    result:=Installer.Processor.Terminate(0);
-    {$IF FPC_FULLVERSION < 30300}
-    Installer.Processor.WaitOnExit;
-    {$ELSE}
-    Installer.Processor.WaitOnExit(5000);
-    {$ENDIF}
+    Installer.Processor.Terminate;
   end;
+
+  //Set all to failed to halt the statemachine
+  for idx:=0 to FParent.FModuleList.Count -1 do
+    PSequenceAttributes(FParent.FModuleList.Objects[idx])^.Executed:=ESFailed;
+
+  FParent.RunInfo:='Process forcefully interrupted by user.';
 end;
 
 constructor TSequencer.Create(aParent:TFPCupManager);
 begin
+  inherited Create;
   FParent:=aParent;
 end;
 

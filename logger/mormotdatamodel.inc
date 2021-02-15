@@ -7,8 +7,11 @@ type
         ufInstallLAZ,
         ufInstallFPCLAZ,
         ufInstallCross,
+        ufUninstallCross,
         ufInstallModule,
-        ufUninstallModule
+        ufUninstallModule,
+        ufCheckMakefile,
+        ufCreateStartup
       );
 
   // keep it very simple: all in one record !!
@@ -59,7 +62,8 @@ const
   AWS_HOST_IP  = 'fpcuplogger.batterybutcher.com';
   IP_DEFAULT   = AWS_HOST_IP;
   //IP_DEFAULT   = '127.0.0.1';
-  PORT_DEFAULT = 8880;
+  PORT_DEFAULT_SERVER = 8890;
+  PORT_DEFAULT_CLIENT = 8880;
   USER_DEFAULT = 'User';
   //PASS_DEFAULT = 'synopse';
   PASS_DEFAULT = USERPASS;

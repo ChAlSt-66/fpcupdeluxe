@@ -23,6 +23,7 @@ program fpcupdeluxe;
     Josh (alternateui)
     Ondrej Kelle
     Marco van de Voort (marcov)
+    Olly (ollydev)
 
 *)
 (*
@@ -45,18 +46,16 @@ program fpcupdeluxe;
 
 uses
   {$IFDEF UNIX}
-  //for threaded auto-updater-notifier
-  //cthreads,
+  cthreads,
   //cmem,  // the c memory manager is on some systems much faster for multi-threading
   {$ENDIF}
   Interfaces, // this includes the LCL widgetset
-  Forms, Classes, sysutils,
-  fpcupdeluxemainform, extrasettings, modulesettings,
-  unzipprogress, infounit,
-  fpcuputil, commandline, installerUniversal, installerManager,
+  Forms, Classes, SysUtils,
+  //extrasettings,
+  //installerManager, installerUniversal,
+  //modulesettings, unzipprogress, infounit, fpcuputil,
   m_crossinstaller,
   m_any_to_androidarm,
-  m_any_to_androidmipsel,
   m_any_to_androidjvm,
   m_any_to_androidaarch64,
   m_any_to_androidx64,
@@ -66,8 +65,15 @@ uses
   m_any_to_linuxmipsel,
   m_any_to_linuxpowerpc64,
   m_any_to_linuxaarch64,
+  m_any_to_aros386,
+  m_any_to_arosx64,
+  m_any_to_arosarm,
+  m_any_to_amigam68k,
+  m_any_to_morphospowerpc,
   m_any_to_haiku386,
   m_any_to_haikux64,
+  m_any_to_dragonflyx64,
+  m_any_to_embeddedaarch64,
   m_any_to_embeddedarm,
   m_any_to_embeddedavr,
   m_any_to_embeddedmipsel,
@@ -77,6 +83,11 @@ uses
   m_any_to_solarisx64,
   m_any_to_solarissparc,
   m_any_to_msdosi8086,
+  m_any_to_go32v2i386,
+  m_any_to_linuxxtensa,
+  m_any_to_freertosxtensa,
+  m_any_to_freertosarm,
+  m_any_to_ultiboarm,
   {$ifdef LINUX}
   //{$ifdef CPUX86}
   m_linux386_to_mips,
@@ -84,20 +95,32 @@ uses
   //{$endif}
   {$endif}
   {$ifdef Darwin}
+  {$ifndef CPUX86_64}
   m_crossdarwin64,
+  {$endif}
+  {$ifndef CPUX86}
   m_crossdarwin32,
-  m_crossdarwinpowerpc,
-  m_crossdarwinarm,
+  {$endif}
+  {$ifndef CPUAARCH64}
   m_crossdarwinaarch64,
-  m_crossdarwinx64iphonesim,
+  {$endif}
+  {$ifdef CPUX86}
+  m_crossdarwinpowerpc,
   m_crossdarwin386iphonesim,
+  {$endif}
+  {$ifdef CPUX86_64}
+  m_crossdarwinx64iphonesim,
+  {$endif}
+  m_crossiosarm,
+  m_crossiosaarch64,
   {$else}
   m_any_to_darwin386,
   m_any_to_darwinx64,
+  m_any_to_darwinaarch64,
+  m_any_to_iosarm,
+  m_any_to_iosaarch64,
   m_any_to_darwinpowerpc,
   m_any_to_darwinpowerpc64,
-  m_any_to_darwinarm,
-  m_any_to_darwinaarch64,
   {$endif}
   {$IF defined(FREEBSD) or defined(NETBSD) or defined(OPENBSD)}
   m_freebsd_to_linux386,
@@ -112,23 +135,29 @@ uses
   m_any_to_freebsdx64,
   m_any_to_freebsd386,
   m_any_to_openbsd386,
+  m_any_to_openbsdx64,
   {$endif}
   {$ifdef MSWINDOWS}
-  m_win32_to_linuxmips, m_win32_to_go32v2i386, m_win32_to_wincearm,
+  m_win32_to_linuxmips, m_win32_to_wincearm,
   {$ifdef win64}
   m_crosswin32,
   {$endif win64}
   {$ifdef win32}
-  m_crosswin64,
+  m_crosswinx64,
+  m_crosswinarm64,
   {$endif win32}
-  {$endif MSWINDOWS}
+  {$else}
   m_anyinternallinker_to_win386,
-  m_anyinternallinker_to_win64;
+  m_anyinternallinker_to_winarm64,
+  m_anyinternallinker_to_winx64,
+  {$endif MSWINDOWS}
+  fpcupdeluxemainform;
 
 {$R *.res}
 
 begin
   RequireDerivedFormResource:=True;
+  Application.Scaled:=True;
   Application.Initialize;
   Application.CreateForm(TForm1, Form1);
   Application.Run;

@@ -58,8 +58,10 @@ Temporary Items
 *.bak
 *.local
 
+*.pot
+
 logger/secrets.inc
-message.inc
+secrets.inc
 
 *.log
 libfpcup/
@@ -80,3 +82,4 @@ deluxebin/
 !deluxebin/languages/*.po
 lib/
 lib*/
+!fpcuptools/*

@@ -108,7 +108,7 @@ type
 
 { THelpInstaller }
 
-THelpInstaller = class(TInstaller)
+THelpInstaller = class(TBaseHelpInstaller)
 private
   InitDone:boolean;
   // Directory where help files are placed
@@ -194,7 +194,9 @@ end;
 implementation
 
 uses
-  fpcuputil, processutils, FileUtil,
+  FileUtil,
+  fpcuputil,
+  processutils,
   {$ifndef FPCONLY}
   updatelazconfig,
   {$endif}
@@ -206,16 +208,17 @@ function THelpInstaller.BuildModuleCustom(ModuleName: string): boolean;
 begin
   result:=true;
   infotext:=Copy(Self.ClassName,2,MaxInt)+' (BuildModuleCustom: '+ModuleName+'): ';
-  infoln(infotext+'Entering ...',etDebug);
+  Infoln(infotext+'Entering ...',etDebug);
 end;
 
 function THelpInstaller.InitModule: boolean;
 var
   BinPath: string; //path where compiler is
   PlainBinPath: string; //the directory above e.g. c:\development\fpc\bin\i386-win32
+  SVNPath:string;
 begin
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (InitModule): ';
-  infoln(localinfotext+'Entering ...',etDebug);
+  Infoln(localinfotext+'Entering ...',etDebug);
 
   result:=(CheckAndGetTools) AND (CheckAndGetNeededBinUtils);
 
@@ -229,12 +232,19 @@ begin
     // Note: apparently on Windows, the FPC, perhaps Lazarus make scripts expect
     // at least one ; to be present in the path. If you only have one entry, you
     // can add PathSeparator without problems.
-    // http://www.mail-archive.com/fpc-devel@lists.freepascal.org/msg27351.html
-    SetPath(BinPath+PathSeparator+
+    // https://www.mail-archive.com/fpc-devel@lists.freepascal.org/msg27351.html
+
+    SVNPath:='';
+    if Length(FSVNDirectory)>0
+       then SVNPath:=ExcludeTrailingPathDelimiter(FSVNDirectory)+PathSeparator;
+
+    SetPath(
+      BinPath+PathSeparator+
       PlainBinPath+PathSeparator+
       FMakeDir+PathSeparator+
-      FSVNDirectory+PathSeparator+
-      FInstallDirectory,false,false);
+      SVNPath+
+      ExcludeTrailingPathDelimiter(FInstallDirectory),
+      false,false);
     {$ENDIF MSWINDOWS}
     {$IFDEF UNIX}
     SetPath(BinPath+PathSeparator+
@@ -271,7 +281,7 @@ end;
 
 function THelpInstaller.GetModule(ModuleName: string): boolean;
 const
-  HELPSOURCEURL : array [0..12,0..1] of string = (
+  HELPSOURCEURL : array [0..17,0..1] of string = (
     ('0.9.28','/Old%20releases/Lazarus%200.9.28/fpc-lazarus-0.9.28-doc-chm.tar.bz2'),
     ('0.9.30','/Old%20releases/Lazarus%200.9.30/fpc-lazarus-doc-chm-0.9.30.tar.bz2'),
     ('0.9.30.4','/Old%20releases/Lazarus%200.9.30.4/fpc-lazarus-doc-chm-0.9.30.4.tar.bz2'),
@@ -284,10 +294,17 @@ const
     ('1.8','/Lazarus%201.8.0/doc-chm-fpc3.0.2-laz1.8.zip'),
     ('1.8.2','/Lazarus%201.8.2/doc-chm-fpc3.0.2-laz1.8.zip'),
     ('1.8.4','/Lazarus%201.8.4/doc-chm-fpc3.0.4-laz1.8.zip'),
-    ('2.0.0','/Lazarus%202.0.0/doc-chm-fpc3.0.4-laz2.0.zip')
+    ('2.0.0','/Lazarus%202.0.0/doc-chm-fpc3.0.4-laz2.0.zip'),
+    ('2.0.2','/Lazarus%202.0.2/doc-chm-fpc3.0.4-laz2.0.2.zip'),
+    ('2.0.4','/Lazarus%202.0.4/doc-chm-fpc3.0.4-laz2.0.4.zip'),
+    ('2.0.6','/Lazarus%202.0.6/doc-chm-fpc3.0.4-laz2.0.6.zip'),
+    ('2.0.8','/Lazarus%202.0.8/doc-chm-fpc3.0.4-laz2.0.8.zip'),
+    ('2.0.10','/Lazarus%202.0.10/doc-chm-fpc3.2.0-laz2.0.10.zip')
   );
   HELP_URL_BASE='https://sourceforge.net/projects/lazarus/files/Lazarus%20Documentation';
   HELP_URL_BASE_ALTERNATIVE='http://mirrors.iwi.me/lazarus/releases/Lazarus%20Documentation';
+  HELP_URL_FTP=LAZARUSFTPURL+'releases/Lazarus%20Documentation';
+
 var
   DocsZip: string;
   OperationSucceeded: boolean;
@@ -303,7 +320,7 @@ begin
     FileExists(FTargetDirectory+'rtl.chm') then
   begin
     OperationSucceeded:=true;
-    infoln(ModuleName+': skipping docs download: FPC rtl.chm and fcl.chm already present in docs directory '+FTargetDirectory,etInfo);
+    Infoln(ModuleName+': skipping docs download: FPC rtl.chm and fcl.chm already present in docs directory '+FTargetDirectory,etInfo);
   end
   else
   begin
@@ -313,7 +330,7 @@ begin
     i:=Low(HELPSOURCEURL);
     repeat
       LazarusVersion:=HELPSOURCEURL[i,0];
-      if GetNumericalVersion(LazarusVersion)>=CalculateFullVersion(FMajorVersion,FMinorVersion,FReleaseVersion) then
+      if CalculateNumericalVersion(LazarusVersion)>=CalculateFullVersion(FMajorVersion,FMinorVersion,FReleaseVersion) then
       begin
         HelpUrl:=HELPSOURCEURL[i,1];
         //Continue search for even better version with same version number
@@ -321,7 +338,7 @@ begin
         begin
           Inc(i);
           LazarusVersion:=HELPSOURCEURL[i,0];
-          if GetNumericalVersion(LazarusVersion)=CalculateFullVersion(FMajorVersion,FMinorVersion,FReleaseVersion) then
+          if CalculateNumericalVersion(LazarusVersion)=CalculateFullVersion(FMajorVersion,FMinorVersion,FReleaseVersion) then
           begin
             HelpUrl:=HELPSOURCEURL[i,1];
           end;
@@ -354,8 +371,8 @@ begin
       HelpUrl:=HELPSOURCEURL[High(HELPSOURCEURL),1];
     end;
 
-    ForceDirectories(ExcludeTrailingPathDelimiter(FTargetDirectory));
-    DocsZip := GetTempFileNameExt('','FPCUPTMP','zip');
+    ForceDirectoriesSafe(ExcludeTrailingPathDelimiter(FTargetDirectory));
+    DocsZip := GetTempFileNameExt('FPCUPTMP','zip');
 
     OperationSucceeded:=true;
 
@@ -366,7 +383,7 @@ begin
       begin
         // Deal with timeouts, wrong URLs etc
         OperationSucceeded:=false;
-        infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE+HelpUrl+LineEnding+
+        Infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE+HelpUrl+LineEnding+
           'Exception: '+E.ClassName+'/'+E.Message, etWarning);
       end;
     end;
@@ -382,7 +399,7 @@ begin
         begin
           // Deal with timeouts, wrong URLs etc
           OperationSucceeded:=false;
-          infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE+HelpUrl+LineEnding+
+          Infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE+HelpUrl+LineEnding+
             'Exception: '+E.ClassName+'/'+E.Message, etWarning);
         end;
       end;
@@ -399,7 +416,7 @@ begin
         begin
           // Deal with timeouts, wrong URLs etc
           OperationSucceeded:=false;
-          infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE_ALTERNATIVE+HelpUrl+LineEnding+
+          Infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE_ALTERNATIVE+HelpUrl+LineEnding+
             'Exception: '+E.ClassName+'/'+E.Message, etWarning);
         end;
       end;
@@ -416,7 +433,24 @@ begin
         begin
           // Deal with timeouts, wrong URLs etc
           OperationSucceeded:=false;
-          infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE_ALTERNATIVE+HelpUrl+LineEnding+
+          Infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_BASE_ALTERNATIVE+HelpUrl+LineEnding+
+            'Exception: '+E.ClassName+'/'+E.Message, etWarning);
+        end;
+      end;
+    end;
+
+    if NOT OperationSucceeded then
+    begin
+      //Try a final time with FTP URL
+      SysUtils.DeleteFile(DocsZip); //Get rid of temp zip
+      try
+        OperationSucceeded:=Download(FUseWget, HELP_URL_FTP+HelpUrl, DocsZip);
+      except
+        on E: Exception do
+        begin
+          // Deal with timeouts, wrong URLs etc
+          OperationSucceeded:=false;
+          Infoln(ModuleName+': Download documents failed. URL: '+HELP_URL_FTP+HelpUrl+LineEnding+
             'Exception: '+E.ClassName+'/'+E.Message, etWarning);
         end;
       end;
@@ -436,14 +470,14 @@ begin
           Free;
         end;
       end;
-      if (NOT OperationSucceeded) then writelnlog(etError, 'Download docs error: unzip failed due to unknown error.');
+      if (NOT OperationSucceeded) then WritelnLog(etError, 'Download docs error: unzip failed due to unknown error.');
 
       {
       ResultCode:=ExecuteCommand(FUnzip+' -o -j -d '+FTargetDirectory+' '+DocsZip,FVerbose);
       if ResultCode <> 0 then
       begin
         OperationSucceeded := False;
-        infoln(ModuleName+': unzip failed with resultcode: '+IntToStr(ResultCode),etwarning);
+        Infoln(ModuleName+': unzip failed with resultcode: '+IntToStr(ResultCode),etwarning);
       end;
       }
     end;
@@ -452,7 +486,7 @@ begin
   SysUtils.DeleteFile(DocsZip); //Get rid of temp zip
 
 
-  if NOT OperationSucceeded then writelnlog(ModuleName+': Fatal error. Could not download help docs ! But I will continue !!', true);
+  if NOT OperationSucceeded then WritelnLog(ModuleName+': Fatal error. Could not download help docs ! But I will continue !!', true);
   //result:=OperationSucceeded;
   // always continue,  even when docs were not build !!
   result:=True;
@@ -492,7 +526,7 @@ begin
     FTargetDirectory:=IncludeTrailingPathDelimiter(FInstallDirectory)+
       'doc'+DirectorySeparator+
       'ide'+DirectorySeparator; ;
-    infoln(infotext+'Documentation directory: '+FTargetDirectory,etInfo);
+    Infoln(infotext+'Documentation directory: '+FTargetDirectory,etInfo);
     result:=true;
   end;
 end;
@@ -503,28 +537,28 @@ begin
   // Check for valid directory
   if not DirectoryExists(FTargetDirectory) then
   begin
-    infoln(infotext+'Directory '+FTargetDirectory+' does not exist. Exiting CleanModule.',etInfo);
+    Infoln(infotext+'Directory '+FTargetDirectory+' does not exist. Exiting CleanModule.',etInfo);
     exit;
   end;
   if result then
   try
     { Delete .chm files and .xct (cross reference) files
       that could have been downloaded in FPC docs or created by fpcup }
-    sysutils.DeleteFile(FTargetDirectory+'fcl.chm');
-    sysutils.DeleteFile(FTargetDirectory+'fpdoc.chm');
-    sysutils.DeleteFile(FTargetDirectory+'prog.chm');
-    sysutils.DeleteFile(FTargetDirectory+'ref.chm');
-    sysutils.DeleteFile(FTargetDirectory+'rtl.chm');
-    sysutils.DeleteFile(FTargetDirectory+'toc.chm');
-    sysutils.DeleteFile(FTargetDirectory+'user.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'fcl.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'fpdoc.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'prog.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'ref.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'rtl.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'toc.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'user.chm');
     // Cross reference (.xct) files:
-    sysutils.DeleteFile(FTargetDirectory+'fcl.xct');
-    sysutils.DeleteFile(FTargetDirectory+'fpdoc.xct');
-    sysutils.DeleteFile(FTargetDirectory+'prog.xct');
-    sysutils.DeleteFile(FTargetDirectory+'ref.xct');
-    sysutils.DeleteFile(FTargetDirectory+'rtl.xct');
-    sysutils.DeleteFile(FTargetDirectory+'toc.xct');
-    sysutils.DeleteFile(FTargetDirectory+'user.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'fcl.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'fpdoc.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'prog.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'ref.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'rtl.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'toc.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'user.xct');
     result:=true;
   except
     on E: Exception do
@@ -600,9 +634,9 @@ begin
     // Note: this still does not seem to go right. On Linux
     // without lcl.chm it detects the file as readonly...
     if FileExists(ExistingLCLHelp) then
-      infoln('Check if '+ExistingLCLHelp+' exists? Yes.',etInfo)
+      Infoln('Check if '+ExistingLCLHelp+' exists? Yes.',etInfo)
     else
-      infoln('Check if '+ExistingLCLHelp+' exists? No.',etInfo);
+      Infoln('Check if '+ExistingLCLHelp+' exists? No.',etInfo);
     if (FileExists(ExistingLCLHelp)=false) or
       (
       (FileIsReadOnly(ExistingLCLHelp)=false)
@@ -616,15 +650,15 @@ begin
       if OperationSucceeded then
       begin
         // Only recompile build_lcl_docs.exe if needed
-        if CheckExecutable(BuildLCLDocsExe, '--help', 'build_lcl_docs')=false then
+        if CheckExecutable(BuildLCLDocsExe, ['--help'], 'build_lcl_docs')=false then
         begin
           // Check for valid lazbuild.
           // Note: we don't check if we have a valid primary config path, but that will come out
           // in the next steps.
           LazbuildApp:=IncludeTrailingPathDelimiter(FInstallDirectory)+LAZBUILDNAME+GetExeExt;
-          if CheckExecutable(LazbuildApp, '--help',LAZBUILDNAME)=false then
+          if CheckExecutable(LazbuildApp, ['--help'],LAZBUILDNAME)=false then
           begin
-            writelnlog(ModuleName+': No valid lazbuild executable found. Aborting.', true);
+            WritelnLog(ModuleName+': No valid lazbuild executable found. Aborting.', true);
             OperationSucceeded:=false;
           end;
 
@@ -633,17 +667,16 @@ begin
             // We have a working lazbuild; let's hope it works with primary config path as well
             // Build Lazarus chm help compiler; will be used to compile fpdocs xml format into .chm help
             Processor.Executable := LazbuildApp;
-            Processor.Parameters.Clear;
-            Processor.Parameters.Add('--primary-config-path='+LazarusPrimaryConfigPath+'');
-            Processor.Parameters.Add(FBuildLCLDocsExeDirectory+'build_lcl_docs.lpr');
-            infoln(ModuleName+': compiling build_lcl_docs help compiler:',etInfo);
-            writelnlog('Building help compiler (also time consuming generation of documents) !!!!!!', true);
-            writelnlog('Execute: '+Processor.Executable+'. Params: '+Processor.Parameters.CommaText, true);
-            Processor.Execute;
-            writelnlog('Execute: '+Processor.Executable+' exit code: '+InttoStr(Processor.ExitStatus), true);
-            if Processor.ExitStatus <> 0 then
+            Processor.Process.Parameters.Clear;
+            Processor.Process.Parameters.Add('--primary-config-path='+LazarusPrimaryConfigPath+'');
+            Processor.Process.Parameters.Add(FBuildLCLDocsExeDirectory+'build_lcl_docs.lpr');
+            Infoln(ModuleName+': compiling build_lcl_docs help compiler:',etInfo);
+            WritelnLog('Building help compiler (also time consuming generation of documents) !!!!!!', true);
+            ProcessorResult:=Processor.ExecuteAndWait;
+            WritelnLog('Execute: '+Processor.Executable+' exit code: '+InttoStr(ProcessorResult), true);
+            if ProcessorResult <> 0 then
             begin
-              writelnlog(etError,ModuleName+': error compiling build_lcl_docs docs builder.', true);
+              WritelnLog(etError,ModuleName+': error compiling build_lcl_docs docs builder.', true);
               OperationSucceeded := False;
             end;
           end;
@@ -655,28 +688,28 @@ begin
         'bin'+DirectorySeparator+
         GetFPCTarget(true)+DirectorySeparator+
         'fpdoc'+GetExeExt;
-      if (CheckExecutable(FPDocExe, '--help', 'FPDoc')=false) then
+      if (CheckExecutable(FPDocExe, ['--help'], 'FPDoc')=false) then
       begin
       FPDocExe:=FFPCSourceDirectory+
         'utils'+DirectorySeparator+
         'fpdoc'+DirectorySeparator+
         'fpdoc'+GetExeExt;
       end;
-      if (CheckExecutable(FPDocExe, '--help', 'FPDoc')=false) then
+      if (CheckExecutable(FPDocExe, ['--help'], 'FPDoc')=false) then
       begin
         // Try again, in bin directory; newer FPC releases may have migrated to this
         FPDocExes:=FindAllFiles(FFPCBinDirectory+'bin'+DirectorySeparator,
           'fpdoc'+GetExeExt,true);
         try
           if FPDocExes.Count>0 then FPDocExe:=FPDocExes[0]; //take only the first
-          if (CheckExecutable(FPDocExe, '--help', 'FPDoc')=false) then
+          if (CheckExecutable(FPDocExe, ['--help'], 'FPDoc')=false) then
           begin
-            writelnlog(etError,ModuleName+': no valid fpdoc executable found ('+FPDocExe+'). Please recompile fpc.', true);
+            WritelnLog(etError,ModuleName+': no valid fpdoc executable found ('+FPDocExe+'). Please recompile fpc.', true);
             OperationSucceeded := False;
           end
           else
           begin
-            infoln(ModuleName+': found valid fpdoc executable.',etInfo);
+            Infoln(ModuleName+': found valid fpdoc executable.',etInfo);
           end;
         finally
           FPDocExes.Free;
@@ -689,46 +722,44 @@ begin
         Processor.Executable := BuildLCLDocsExe;
         // Make sure directory switched to that of the FPC docs,
         // otherwise paths to source files will not work.
-        Processor.CurrentDirectory:=ExcludeTrailingPathDelimiter(FTargetDirectory);
-        Processor.Parameters.Clear;
+        Processor.Process.CurrentDirectory:=ExcludeTrailingPathDelimiter(FTargetDirectory);
+        Processor.Process.Parameters.Clear;
         // Instruct build_lcl_docs to cross-reference FPC documentation by specifying
         // the directory that contains the fcl and rtl .xct files.
         // If those .xct files are not present, FPC 2.7.1 fpdoc will throw an exception
-        Processor.Parameters.Add('--fpcdocs');
-        Processor.Parameters.Add(ExcludeTrailingPathDelimiter(FTargetDirectory));
+        Processor.Process.Parameters.Add('--fpcdocs');
+        Processor.Process.Parameters.Add(ExcludeTrailingPathDelimiter(FTargetDirectory));
         // Let build_lcl_docs know which fpdoc application to use:
-        Processor.Parameters.Add('--fpdoc');
-        Processor.Parameters.Add(FPDocExe);
+        Processor.Process.Parameters.Add('--fpdoc');
+        Processor.Process.Parameters.Add(FPDocExe);
         // Newer versions of fpc mess up the .css file location;
         // Exception at 00441644: Exception:
         // Can't find CSS file "..\fpdoc.css".
         //
         // So specify path explicitly
         // --css-file argument available since r42283
-        Processor.Parameters.Add('--css-file='+FFPCSourceDirectory+
+        Processor.Process.Parameters.Add('--css-file='+FFPCSourceDirectory+
           'utils'+DirectorySeparator+'fpdoc'+DirectorySeparator+'fpdoc.css');
 
-        Processor.Parameters.Add('--outfmt');
-        Processor.Parameters.Add('chm');
+        Processor.Process.Parameters.Add('--outfmt');
+        Processor.Process.Parameters.Add('chm');
         { this will give a huge amount of warnings which should be fixed by
         fpdoc and/or the .chm files so are rather useless
-        Processor.Parameters.Add('--warnings'); //let tool show warnings as well
+        Processor.Process.Parameters.Add('--warnings'); //let tool show warnings as well
         }
         // Show application output if desired:
-        if FVerbose then Processor.OnOutput:=@DumpConsole;
-        infoln(ModuleName+': compiling chm help docs:',etInfo);
+        Infoln(ModuleName+': compiling chm help docs:',etInfo);
         { The CHM file gets output into <lazarusdir>/docs/chm/lcl/lcl.chm
         Though that may work when adjusting the baseurl option in Lazarus for each
         CHM file, it's easier to move them to <lazarusdir>/docs/chm,
         which is picked up by the default Lazarus settings.
         The generated .xct file is an index file for fpdoc cross file links,
         used if you want to link to the chm from other chms.}
-        writelnlog('Execute: '+Processor.Executable+'. Params: '+Processor.Parameters.CommaText, true);
-        Processor.Execute;
-        BuildResult:=Processor.ExitStatus;
+        ProcessorResult:=Processor.ExecuteAndWait;
+        BuildResult:=ProcessorResult;
         if BuildResult <> 0 then
         begin
-          writelnlog(etError,ModuleName+': error creating chm help docs. build_lcl_docs exit status: '+IntToStr(BuildResult), true);
+          WritelnLog(etError,ModuleName+': error creating chm help docs. build_lcl_docs exit status: '+IntToStr(BuildResult), true);
           OperationSucceeded := False;
         end;
       end;
@@ -740,13 +771,13 @@ begin
         begin
           if FileSize(GeneratedLCLHelp)>0 then
           begin
-            infoln(ModuleName+': moving lcl.chm to docs directory',etInfo);
+            Infoln(ModuleName+': moving lcl.chm to docs directory',etInfo);
             OperationSucceeded:=MoveFile(GeneratedLCLHelp,ExistingLCLHelp);
           end
           else
           begin
             // File exists, but is empty. We might have an older file still present
-            writelnlog(etWarning, ModuleName+': WARNING: '+GeneratedLCLHelp+
+            WritelnLog(etWarning, ModuleName+': WARNING: '+GeneratedLCLHelp+
             ' was created but is empty (perhaps due to FPC bugs). Lcl.chm may be out of date! Try running with --verbose to see build_lcl_docs error messages.', true);
             // Todo: change this once fixes for fpdoc chm generation are in fixes_26:
             OperationSucceeded:=true;
@@ -758,13 +789,13 @@ begin
     begin
       // Indicate reason for not creating lcl.chm
       if FileIsReadOnly(ExistingLCLHelp) then
-        infoln(ModuleName+': not building LCL.chm as it is read only.',etInfo)
+        Infoln(ModuleName+': not building LCL.chm as it is read only.',etInfo)
       else
-        infoln(ModuleName+': not building LCL.chm as it is quite recent: '+FormatDateTime('YYYYMMDD',LCLDate),etInfo);
+        Infoln(ModuleName+': not building LCL.chm as it is quite recent: '+FormatDateTime('YYYYMMDD',LCLDate),etInfo);
     end;
   end;
 
-  if NOT OperationSucceeded then writelnlog(etWarning, ModuleName+': Something went wrong. But I will continue !!', true);
+  if NOT OperationSucceeded then WritelnLog(etWarning, ModuleName+': Something went wrong. But I will continue !!', true);
   //result:=OperationSucceeded;
   // always continue,  even when docs were not build !!
   result:=True;
@@ -773,7 +804,7 @@ end;
 function THelpLazarusInstaller.InitModule: boolean;
 begin
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (InitModule): ';
-  infoln(localinfotext+'Entering ...',etDebug);
+  Infoln(localinfotext+'Entering ...',etDebug);
 
   result:=false;
   if inherited InitModule then
@@ -783,11 +814,11 @@ begin
     FTargetDirectory:=IncludeTrailingPathDelimiter(FInstallDirectory)+
       'docs'+DirectorySeparator+
       'chm'+DirectorySeparator;
-    infoln('helplazarus: documentation directory: '+FTargetDirectory,etInfo);
+    Infoln('helplazarus: documentation directory: '+FTargetDirectory,etInfo);
     FBuildLCLDocsExeDirectory:=IncludeTrailingPathDelimiter(FInstallDirectory)+
       'docs'+DirectorySeparator+
       'html'+DirectorySeparator;
-    infoln(localinfotext+'FBuildLCLDocsExeDirectory: '+FTargetDirectory,etDebug);
+    Infoln(localinfotext+'FBuildLCLDocsExeDirectory: '+FTargetDirectory,etDebug);
     result:=true;
   end;
 end;
@@ -798,30 +829,30 @@ begin
   // Check for valid directory
   if not DirectoryExists(FTargetDirectory) then
   begin
-    infoln('HelpLazarusInstaller CleanModule: directory '+FTargetDirectory+' does not exist. Exiting CleanModule.',etInfo);
+    Infoln('HelpLazarusInstaller CleanModule: directory '+FTargetDirectory+' does not exist. Exiting CleanModule.',etInfo);
     exit;
   end;
   if result then
   try
     { Delete .chm files and .xct (cross reference) files
       that could have been downloaded in FPC docs or created by fpcup }
-    sysutils.DeleteFile(FTargetDirectory+'fcl.chm');
-    sysutils.DeleteFile(FTargetDirectory+'fpdoc.chm');
-    sysutils.DeleteFile(FTargetDirectory+'prog.chm');
-    sysutils.DeleteFile(FTargetDirectory+'ref.chm');
-    sysutils.DeleteFile(FTargetDirectory+'rtl.chm');
-    sysutils.DeleteFile(FTargetDirectory+'lcl.chm');
-    sysutils.DeleteFile(FTargetDirectory+'toc.chm');
-    sysutils.DeleteFile(FTargetDirectory+'user.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'fcl.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'fpdoc.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'prog.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'ref.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'rtl.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'lcl.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'toc.chm');
+    SysUtils.DeleteFile(FTargetDirectory+'user.chm');
     // Cross reference (.xct) files:
-    sysutils.DeleteFile(FTargetDirectory+'fcl.xct');
-    sysutils.DeleteFile(FTargetDirectory+'fpdoc.xct');
-    sysutils.DeleteFile(FTargetDirectory+'prog.xct');
-    sysutils.DeleteFile(FTargetDirectory+'ref.xct');
-    sysutils.DeleteFile(FTargetDirectory+'rtl.xct');
-    sysutils.DeleteFile(FTargetDirectory+'lcl.xct');
-    sysutils.DeleteFile(FTargetDirectory+'toc.xct');
-    sysutils.DeleteFile(FTargetDirectory+'user.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'fcl.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'fpdoc.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'prog.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'ref.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'rtl.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'lcl.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'toc.xct');
+    SysUtils.DeleteFile(FTargetDirectory+'user.xct');
     result:=true;
   except
     on E: Exception do
@@ -839,11 +870,11 @@ begin
   result:=inherited ConfigModule(ModuleName);
   if result then
   begin
-    result:=ForceDirectories(FLazarusPrimaryConfigPath);
+    result:=ForceDirectoriesSafe(FLazarusPrimaryConfigPath);
   end
   else
   begin
-    writelnlog('Lazarus help: error: could not create primary config path '+FLazarusPrimaryConfigPath);
+    WritelnLog('Lazarus help: error: could not create primary config path '+FLazarusPrimaryConfigPath);
   end;
   if result then
   begin
@@ -865,7 +896,7 @@ begin
         on E: Exception do
         begin
           result:=false;
-          writelnlog('Lazarus help: Error setting Lazarus config: '+E.ClassName+'/'+E.Message, true);
+          WritelnLog('Lazarus help: Error setting Lazarus config: '+E.ClassName+'/'+E.Message, true);
         end;
       end;
     finally
@@ -889,7 +920,7 @@ begin
   LazarusConfig:=TUpdateLazConfig.Create(LazarusPrimaryConfigPath);
   try
     LazVersion:=LazarusConfig.GetVariable(EnvironmentConfig,'EnvironmentOptions/Version/Lazarus');
-    GetVersionFromString(LazVersion,FMajorVersion,FMinorVersion,FReleaseVersion);
+    VersionFromString(LazVersion,FMajorVersion,FMinorVersion,FReleaseVersion,FPatchVersion);
   finally
     LazarusConfig.Free;
   end;

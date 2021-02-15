@@ -37,8 +37,6 @@ interface
 
 uses
   Classes, SysUtils,
-  processutils,
-  FileUtil {Requires LCL},
   repoclient;
 
 const
@@ -69,36 +67,35 @@ type
     function GetRepoExecutableName: string; override;
     function FindRepoExecutable: string; override;
   public
+    property UserName: string read FUserName write FUserName;
+    property Password: string read FPassword write FPassword;
+
     procedure CheckOutOrUpdate; override;
     function Commit(Message: string): boolean; override;
-    function Execute(Command: string): integer; override;
     function GetDiffAll: string; override;
     procedure LocalModifications(var FileList: TStringList); override;
     function LocalRepositoryExists: boolean; override;
     //Revision number of local repository - the repository wide revision number regardless of what branch we are in
     property LocalRevisionWholeRepo: string read GetLocalRevisionWholeRepo;
-    property UserName: string read FUserName write FUserName;
-    property Password: string read FPassword write FPassword;
-    // Run SVN log command for repository and put results into Log
-    procedure Log(var Log: TStringList); override;
     procedure ParseFileList(const CommandOutput: string; var FileList: TStringList; const FilterCodes: array of string); override;
-    procedure DeleteDirectories(const CommandOutput: string);
     procedure SwitchURL; override;
     procedure Revert; override;
-    constructor Create;
-    destructor Destroy; override;
+    function CheckURL: boolean;
+    // Run SVN log command for repository and put results into Log
+    procedure Log(var Log: TStringList); override;
   end;
 
 
 implementation
 
 uses
-  fpcuputil,
-  Process,
   {$IFDEF UNIX}
   BaseUnix,Unix,
   {$ENDIF}
-  strutils, regexpr;
+  StrUtils, regexpr,
+  InstallerCore,
+  processutils,
+  fpcuputil;
 
 { TSVNClient }
 function TSVNClient.GetRepoExecutableName: string;
@@ -116,43 +113,48 @@ begin
 
   while True do
   begin
-
-    // Look in path
-    // Windows: will also look for <SVNName>.exe
+    {$IFDEF DARWIN}
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := FindDefaultExecutablePath(RepoExecutableName)
+       then FRepoExecutable := '/Library/Developer/CommandLineTools/usr/bin/svn'
        else break;
+    {$ENDIF}
 
     {$IFDEF MSWINDOWS}
     // Some popular locations for SlikSVN, Subversion, and TortoiseSVN:
     // Covers both 32 bit and 64 bit Windows.
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles\Subversion\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles')+'\Subversion\bin\' + RepoExecutableName + '.exe'
        else break;
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)\Subversion\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)')+'\Subversion\bin\' + RepoExecutableName + '.exe'
        else break;
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles\SlikSvn\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles')+'\SlikSvn\bin\' + RepoExecutableName + '.exe'
        else break;
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)\SlikSvn\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)')+'\SlikSvn\bin\' + RepoExecutableName + '.exe'
        else break;
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles\TorToiseSVN\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles')+'\TorToiseSVN\bin\' + RepoExecutableName + '.exe'
        else break;
     if not FileExists(FRepoExecutable)
-       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)\TorToiseSVN\bin\' + RepoExecutableName + '.exe')
+       then FRepoExecutable := GetEnvironmentVariable('ProgramFiles(x86)')+'\TorToiseSVN\bin\' + RepoExecutableName + '.exe'
        else break;
     //Directory where current executable is:
     if not FileExists(FRepoExecutable)
        then FRepoExecutable := (SafeGetApplicationPath + RepoExecutableName + '.exe')
        else break;
-   {$ENDIF MSWINDOWS}
+    {$ENDIF MSWINDOWS}
+
+    // Look in path
+    // Windows: will also look for <SVNName>.exe
+    if not FileExists(FRepoExecutable) then
+      FRepoExecutable := Which(RepoExecutableName+GetExeExt);
+
     break;
   end;
 
-  if not FileExists(FRepoExecutable) then
+  if (not FileExists(FRepoExecutable)) then
   begin
     //current directory. Note: potential for misuse by malicious program.
     {$ifdef mswindows}
@@ -167,19 +169,28 @@ begin
   // If file exists, check for valid svn executable
   if FileExists(FRepoExecutable) then
   begin
-    rv:=ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' --version', Verbose);
-    if rv<>0 then
+    //rv:=TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' --version', Verbose);
+    //if rv<>0 then
+    if (NOT CheckExecutable(FRepoExecutable, ['--version'], '', true)) then
     begin
       FRepoExecutable := '';
-    end;
-    {
-    rv:=ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' --version', Output, Verbose);
-    // a good SVN has version info. If not : error !!
-    if Ansipos('version', Output) = 0 then
+      //ThreadLog('SVN client found, but error code during check: '+InttoStr(rv),etError);
+      ThreadLog('SVN client found, but error code during check !',etError);
+    end
+    else
     begin
-      FRepoExecutable := '';
+      if (CheckExecutable(FRepoExecutable, ['--version'], 'pc-msys', true)) then
+      begin
+        FRepoExecutable := '';
+        ThreadLog('SVN client found in path, but its from MSYS and that does not work with fpcupdeluxe.',etWarning);
+      end;
+      if (CheckExecutable(FRepoExecutable, ['--version'], 'pc-cygwin', true)) then
+      begin
+        FRepoExecutable := '';
+        ThreadLog('SVN client found in path, but its from CYGWIN and that does not work with fpcupdeluxe.',etWarning);
+      end;
+
     end;
-    }
   end
   else
   begin
@@ -242,10 +253,10 @@ begin
        if UseForce then Command:=StringReplace(Command,' checkout ',' checkout --force ',[]);
      end;
 
-  if (FDesiredRevision = '') or (Uppercase(trim(FDesiredRevision)) = 'HEAD') then
-    Command:=Command+'HEAD '+Repository+' '+LocalRepository
+  if (DesiredRevision = '') or (Uppercase(trim(DesiredRevision)) = 'HEAD') then
+    Command:=Command+'HEAD '+Repository+' '+DoubleQuoteIfNeeded(LocalRepository)
   else
-    Command:=Command+FDesiredRevision+' '+Repository+' '+LocalRepository;
+    Command:=Command+DesiredRevision+' '+Repository+' '+DoubleQuoteIfNeeded(LocalRepository);
 
   {$IFNDEF MSWINDOWS}
   // due to the fact that strnew returns nil for an empty string, we have to use something special to process a command with empty strings on non windows systems
@@ -253,7 +264,7 @@ begin
   if Pos('emptystring',Command)>0 then
   begin
     Command:=StringReplace(Command,'emptystring','""',[rfReplaceAll,rfIgnoreCase]);
-    TempOutputFile := GetTempFileNameExt('','FPCUPTMP','svn');
+    TempOutputFile:=ChangeFileExt(GetTempFileName(GetTempDir(false),'FPCUPTMP'),'svn');
     Command:=Command+' &> '+TempOutputFile;
     ExecuteSpecialDue2EmptyString:=True;
   end;
@@ -263,10 +274,9 @@ begin
 
   while true do
   begin
-    {$IFNDEF MSWINDOWS}
+    {$IFDEF UNIX}
     if ExecuteSpecialDue2EmptyString then
     begin
-      if Verbose then infoln('Executing: '+FRepoExecutable+' '+Command);
       //FReturnCode := ExecuteProcess(FRepoExecutable,Command,[]);
       //FReturnCode := FpExecL(FRepoExecutable,[Command]);
       //FReturnCode := FpExecL('/bin/sh',['-c',Command]);
@@ -279,10 +289,6 @@ begin
         try
           TempOutputSL.LoadFromFile(TempOutputFile);
           Output:=TempOutputSL.ToString;
-          if Verbose then
-          begin
-            for i:=0 to (TempOutputSL.Count-1) do infoln(TempOutputSL[i]);
-          end;
         finally
           TempOutputSL.Free();
         end;
@@ -291,13 +297,14 @@ begin
     end
     else
     {$ENDIF}
-    FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, Verbose);
-
+    FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, Verbose);
     FReturnOutput := Output;
 
-    if (ReturnCode = 0) then break else
+    if (ReturnCode=AbortedExitCode) then break;
+
+    if (ReturnCode=0) then break else
     begin
-      infoln('SVN client error return code: '+InttoStr(ReturnCode),etWarning);
+      ThreadLog('SVN client error return code: '+InttoStr(ReturnCode),etWarning);
 
       Inc(RetryAttempt);
 
@@ -309,13 +316,15 @@ begin
       //E170013: Unable to connect to a repository at URL
       //E731001: Host is unknown.
       //E175012: Connection timed out
-      if ((Pos('E175002', Output)>0) OR (Pos('E730065', Output)>0) OR (Pos('E170013', Output)>0) OR (Pos('E731001', Output)>0) OR (Pos('E175012', Output)>0)) then
+      //E120108: The server unexpectedly closed the connection
+      if ((Pos('E175002', Output)>0) OR (Pos('E730065', Output)>0) OR (Pos('E170013', Output)>0) OR (Pos('E731001', Output)>0) OR (Pos('E175012', Output)>0) OR (Pos('E120108', Output)>0)) then
       begin
         //do a simple retry in case of connection failures
         if RetryAttempt>CONNECTIONMAXRETRIES then break else
         begin
           // remove locks if any
-          ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose);
+          FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose);
+          if (ReturnCode=AbortedExitCode) then exit;
           // try again
           continue;
         end;
@@ -328,7 +337,8 @@ begin
       if (Pos('E155004', Output) > 0) OR (Pos('E175002', Output) > 0) then
       begin
         // Let's try one time to fix it and don't update FReturnCode here
-        ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose); //attempt again
+        FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //attempt again
+        if (ReturnCode=AbortedExitCode) then exit;
         // We probably ended up with a local repository where not all files were checked out
         // Let's call update to finalize.
         Update;
@@ -339,20 +349,13 @@ begin
       if Pos('E155036', Output) > 0 then
       begin
         // Let's try one time upgrade to fix it (don't update FReturnCode here)
-        ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' upgrade '+ProxyCommand+' --non-interactive ' + LocalRepository, Verbose); //attempt again
+        FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' upgrade '+ProxyCommand+' --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //attempt again
+        if (ReturnCode=AbortedExitCode) then exit;
         // Now update again:
         Update;
       end;
     end;
   end;
-
-  //FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' update --set-depth exclude ide', Output, Verbose);
-  //DeleteDirectoryEx(IncludeTrailingPathDelimiter(LocalRepository)+'ide');
-
-  //ExecuteCommand('find . ! -path "./.svn/*" \( -name "*.pas" -o -name "*.pp" -o -name "*.lpk" -o -name "*.lpr" -name "*.lpi" \) -type f -exec sed -i "+''''+"s/\r//"+''''+" {} \;', Output, Verbose);
-  //writeln('SED: ' +Output);
-
-  //find . ! -path "./.svn/*" \( -name "*.pas" -o -name "*.pp" -o -name "*.lpk" -o -name "*.lpr" \) -type f -exec sed -i 's/\r//' {} \;
 
 end;
 
@@ -396,10 +399,10 @@ begin
     Command := ' --username ' + UserName + ' --password ' + Password;
   end;
 
-  if (FDesiredRevision = '') or (Uppercase(trim(FDesiredRevision)) = 'HEAD') then
-    Command := ' update ' + ProxyCommand + Command + ' --quiet --non-interactive --trust-server-cert -r HEAD ' + LocalRepository
+  if (DesiredRevision = '') or (Uppercase(trim(DesiredRevision)) = 'HEAD') then
+    Command := ' update ' + ProxyCommand + Command + ' --quiet --non-interactive --trust-server-cert -r HEAD ' + DoubleQuoteIfNeeded(LocalRepository)
   else
-    Command := ' update ' + ProxyCommand + Command + ' --quiet --non-interactive --trust-server-cert -r ' + FDesiredRevision + ' ' + LocalRepository;
+    Command := ' update ' + ProxyCommand + Command + ' --quiet --non-interactive --trust-server-cert -r ' + DesiredRevision + ' ' + DoubleQuoteIfNeeded(LocalRepository);
 
   {$IFNDEF MSWINDOWS}
   // due to the fact that strnew returns nil for an empty string, we have to use something special to process a command with empty strings on non windows systems
@@ -407,24 +410,25 @@ begin
   if Pos('emptystring',Command)>0 then
   begin
     Command:=StringReplace(Command,'emptystring','""',[rfReplaceAll,rfIgnoreCase]);
-    TempOutputFile := GetTempFileNameExt('','FPCUPTMP','svn');
+    TempOutputFile:=ChangeFileExt(GetTempFileName(GetTempDir(false),'FPCUPTMP'),'svn');
     Command:=Command + ' &> '+TempOutputFile;
     ExecuteSpecialDue2EmptyString:=True;
   end;
   {$ENDIF}
 
   // always perform a cleaup before doing anything else ... just to be sure !
-  ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose);
+  FReturnCode:=TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose);
+
+  if (ReturnCode=AbortedExitCode) then exit;
 
   FileList := TStringList.Create;
   try
     // On Windows, at least certain SVN versions don't update everything.
     // So we try until there are no more files downloaded.
 
-    {$IFNDEF MSWINDOWS}
+    {$IFDEF UNIX}
     if ExecuteSpecialDue2EmptyString then
     begin
-      if Verbose then infoln('Executing: '+FRepoExecutable+' '+Command);
       //FReturnCode := ExecuteProcess(FRepoExecutable,Command,[]);
       //FReturnCode := FpExecL(FRepoExecutable,[Command]);
       //FReturnCode := FpExecL('/bin/sh',['-c',Command]);
@@ -437,10 +441,6 @@ begin
         try
           TempOutputSL.LoadFromFile(TempOutputFile);
           Output:=TempOutputSL.ToString;
-          if Verbose then
-          begin
-            for i:=0 to (TempOutputSL.Count-1) do infoln(TempOutputSL[i]);
-          end;
         finally
           TempOutputSL.Free();
         end;
@@ -449,25 +449,22 @@ begin
     end
     else
     {$ENDIF}
-    FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, Output, Verbose);
+    FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, Output, Verbose);
     FReturnOutput := Output;
+
+    if (ReturnCode=AbortedExitCode) then exit;
 
     if (ReturnCode <> 0) then
     begin
-      infoln('SVN client error return code: '+InttoStr(ReturnCode),etError);
+      ThreadLog('SVN client error return code: '+InttoStr(ReturnCode),etError);
     end;
 
     if (Pos('An obstructing working copy was found', Output) > 0) then
     begin
-      // this is a very severe error !
-      // can only be solved by brute force !!
-      // we are going to delete the .svn directory and any obstructing directories
-      DeleteDirectoryEx(IncludeTrailingPathDelimiter(LocalRepository)+'.svn');
-      DeleteDirectories(Output);
-      // perform forced checkout
-      CheckOut(True);
-      Output:='';
-      // hope all is well now
+      ThreadLog('SVN reported than an obstructing working copy was found.',etError);
+      ThreadLog('Please try to resolve.',etError);
+      FReturnCode := -1;
+      exit;
     end;
 
     FileList.Clear;
@@ -486,16 +483,16 @@ begin
         }
         begin
           // Let's try to release locks; don't update FReturnCode
-          ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose); //attempt again
+          FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //attempt again
+          if (ReturnCode=AbortedExitCode) then exit;
         end;
         //Give everybody a chance to relax ;)
         Sleep(500);
         // attempt again !!
 
-        {$IFNDEF MSWINDOWS}
+        {$IFDEF UNIX}
         if ExecuteSpecialDue2EmptyString then
         begin
-          if Verbose then infoln('Executing: '+FRepoExecutable+' '+Command);
           //FReturnCode := ExecuteProcess(FRepoExecutable,Command,[]);
           //FReturnCode := FpExecL(FRepoExecutable,[Command]);
           //FReturnCode := FpExecL('/bin/sh',['-c',Command]);
@@ -508,10 +505,6 @@ begin
             try
               TempOutputSL.LoadFromFile(TempOutputFile);
               Output:=TempOutputSL.ToString;
-              if Verbose then
-              begin
-                for i:=0 to (TempOutputSL.Count-1) do infoln(TempOutputSL[i]);
-              end;
             finally
               TempOutputSL.Free();
             end;
@@ -526,15 +519,19 @@ begin
         FileList.Clear;
         ParseFileList(Output, FileList, ['?','!']);
         }
-        FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, FReturnOutput, Verbose);
+        FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, FReturnOutput, Verbose);
+        if (ReturnCode=AbortedExitCode) then exit;
+
         AfterErrorRetry := AfterErrorRetry + 1;
 
         // last resort measures
         if (AfterErrorRetry = ERRORMAXRETRIES) then
         begin
           //revert local changes to try to cleanup errors ...
-          //ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' revert -R '+ProxyCommand+' --non-interactive ' + LocalRepository, Verbose); //revert changes
-          ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive --remove-unversioned --remove-ignored ' + LocalRepository, Verbose); //attempt again
+          //FReturnCode := TInstaller(Parent).ExecuteCommandCompat(DoubleQuoteIfNeeded(FRepoExecutable) + ' revert -R '+ProxyCommand+' --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //revert changes
+          FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive --remove-unversioned --remove-ignored ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //attempt again
+          if (ReturnCode=AbortedExitCode) then exit;
+
         end;
 
       end;
@@ -560,7 +557,7 @@ begin
       // Checkout (first download)
       Checkout;
       // Just to be sure, update as well (checkout may have failed without warning):
-      Update;
+      if (FReturnCode<>AbortedExitCode) then Update;
     end;
   end
   else
@@ -578,31 +575,84 @@ begin
     Result:=True;
     exit;
   end;
-  FReturnCode := ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + ' commit '+GetProxyCommand+' --message='+Message, LocalRepository, FReturnOutput, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + ' commit '+GetProxyCommand+' --message='+Message, LocalRepository, FReturnOutput, Verbose);
   Result:=(FReturnCode=0);
 end;
 
-function TSVNClient.Execute(Command: string): integer;
-begin
-  FReturnCode := ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + ' '+Command+' '+GetProxyCommand, LocalRepository, FReturnOutput, Verbose);
-  Result := FReturnCode;
-end;
-
 function TSVNClient.GetDiffAll: string;
+var
+  aFile:string;
+  aResult:TStringList;
+  aProcess:TExternalTool;
 begin
-  Result := ''; //fail by default
+  result := '';
+  FReturnCode := 0;
+
   if ExportOnly then
   begin
-    FReturnCode := 0;
     exit;
   end;
-  // Using proxy more for completeness here
-  //FReturnCode := ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff '+' .', LocalRepository, Result, Verbose);
-  // with external diff program
-  //FReturnCode := ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff --diff-cmd diff --extensions "--binary -wbua"'+' .', LocalRepository, Result, Verbose);
-  // ignoring whitespaces
-  FReturnCode := ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff -x --ignore-space-change'+' .', LocalRepository, Result, Verbose);
-  FReturnOutput := Result;
+
+  aProcess:=nil;
+
+  {$ifdef  MSWINDOWS}
+  aProcess := TExternalTool.Create(nil);
+  aProcess.Process.Executable := GetEnvironmentVariable('COMSPEC');
+  if NOT FileExists(aProcess.Process.Executable) then aProcess.Process.Executable := 'c:\windows\system32\cmd.exe';
+  aProcess.Process.Parameters.Add('/c');
+  {$endif  MSWINDOWS}
+
+  {$ifdef LINUX}
+  aProcess := TExternalTool.Create(nil);
+  aProcess.Process.Executable := '/bin/sh';
+  aProcess.Process.Parameters.Add('-c');
+  {$endif LINUX}
+
+  if Assigned(aProcess) then
+  begin
+    if NOT FileExists(aProcess.Process.Executable) then
+    begin
+      aProcess.Free;
+      aProcess:=nil;
+    end;
+  end;
+
+  if Assigned(aProcess) then
+  begin
+    aFile := ChangeFileExt(GetTempFileName(GetTempDir(false),'FPCUPTMP'),'diff');
+    aProcess.Process.CurrentDirectory:=LocalRepository;
+    aProcess.Process.Parameters.Add(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff -x --ignore-space-change'+' . > ' + aFile);
+    try
+      aProcess.ExecuteAndWait;
+      FReturnCode:=aProcess.ExitCode;
+      if (FReturnCode=0) AND (FileExists(aFile)) then
+      begin
+        aResult:=TStringList.Create;
+        try
+          aResult.LoadFromFile(aFile);
+          result:=aResult.Text;
+        finally
+          aResult.Free;
+        end;
+      end;
+    finally
+      aProcess.Free;
+      aProcess:=nil;
+      DeleteFile(aFile);
+    end;
+  end;
+
+  if result='' then
+  begin
+    // Using proxy more for completeness here
+    //FReturnCode := TInstaller(Parent).ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff '+' .', LocalRepository, Result, Verbose);
+    // with external diff program
+    //FReturnCode := TInstaller(Parent).ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff --diff-cmd diff --extensions "--binary -wbua"'+' .', LocalRepository, Result, Verbose);
+    // ignoring whitespaces
+    FReturnCode := TInstaller(Parent).ExecuteCommandInDir(DoubleQuoteIfNeeded(FRepoExecutable) + GetProxyCommand + ' diff -x --ignore-space-change'+' .', LocalRepository, result, Verbose);
+  end;
+
+  FReturnOutput := result;
 end;
 
 procedure TSVNClient.Log(var Log: TStringList);
@@ -610,7 +660,7 @@ var
   s: string = '';
 begin
   // Using proxy more for completeness here
-  FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' log ' + GetProxyCommand + ' ' + LocalRepository, s, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' log ' + GetProxyCommand + ' ' + DoubleQuoteIfNeeded(LocalRepository), s, Verbose);
   FReturnOutput := s;
   Log.Text := s;
 end;
@@ -622,7 +672,18 @@ begin
     FReturnCode := 0;
     exit;
   end;
-  FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' revert '+GetProxyCommand+' --recursive ' + LocalRepository, FReturnOutput, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' revert '+GetProxyCommand+' --recursive ' + DoubleQuoteIfNeeded(LocalRepository), FReturnOutput, Verbose);
+end;
+
+function TSVNClient.CheckURL: boolean;
+var
+  Output:string;
+begin
+  FReturnCode := TInstaller(Parent).ExecuteCommand(FRepoExecutable,['ls',Repository], False);
+  //FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' ls '+ Repository, Output, False);
+  //FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' ls --depth empty '+ Repository, Output, False);
+  result:=(FReturnCode=0);
+  //result:=(Output=GetFileNameFromURL(Repository));
 end;
 
 procedure TSVNClient.ParseFileList(const CommandOutput: string; var FileList: TStringList; const FilterCodes: array of string);
@@ -639,7 +700,7 @@ begin
   AllFilesRaw := TStringList.Create;
   try
     AllFilesRaw.Text := CommandOutput;
-    for Counter := 0 to AllFilesRaw.Count - 1 do
+    for Counter := 0 to Pred(AllFilesRaw.Count) do
     begin
       //Some sample files (using svn update and svn status):
 
@@ -678,39 +739,6 @@ begin
   end;
 end;
 
-procedure TSVNClient.DeleteDirectories(const CommandOutput: string);
- // Parses directory lists from svn update and svn status outputsto find skipped directories.
- // If FilterCodes specified, only returns the files that match one of the characters in the code (e.g 'CGM');
- // Case-sensitive filter.
-var
-  AllFilesRaw: TStringList;
-  Counter,index: integer;
-  DirName: string;
-begin
-  AllFilesRaw := TStringList.Create;
-  try
-    AllFilesRaw.Text := CommandOutput;
-    for Counter := 0 to AllFilesRaw.Count - 1 do
-    begin
-      DirName:=AllFilesRaw[Counter];
-      index:=Pos('Skipped ',DirName);
-      if index>0 then
-      begin
-        Delete(DirName,1,Length('Skipped '));
-        index:=Pos('--',DirName);
-        if index>0 then
-        begin
-          Delete(DirName,index,MaxInt);
-          RemovePadChars(DirName,[' ','''','"','`']);
-          DeleteDirectoryEx(DirName);
-        end;
-      end;
-    end;
-  finally
-    AllFilesRaw.Free;
-  end;
-end;
-
 procedure TSVNClient.SwitchURL;
 var
   Command: string;
@@ -740,16 +768,18 @@ begin
     Command := ' --username ' + UserName + ' --password ' + Password;
   end;
 
-  if (FDesiredRevision = '') or (Uppercase(trim(FDesiredRevision)) = 'HEAD') then
-    Command := ' switch ' + ProxyCommand + Command + ' --force --quiet --non-interactive --trust-server-cert -r HEAD ' + Repository + ' ' + LocalRepository
+  if (DesiredRevision = '') or (Uppercase(trim(DesiredRevision)) = 'HEAD') then
+    Command := ' switch ' + ProxyCommand + Command + ' --force --quiet --non-interactive --trust-server-cert -r HEAD ' + Repository + ' ' + DoubleQuoteIfNeeded(LocalRepository)
   else
-    Command := ' switch ' + ProxyCommand + Command + ' --force --quiet --non-interactive --trust-server-cert -r ' + FDesiredRevision + ' ' + Repository + ' ' + LocalRepository;
+    Command := ' switch ' + ProxyCommand + Command + ' --force --quiet --non-interactive --trust-server-cert -r ' + DesiredRevision + ' ' + Repository + ' ' + DoubleQuoteIfNeeded(LocalRepository);
 
   // always perform a cleaup before doing anything else ... just to be sure !
-  ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose);
+  if (ReturnCode=AbortedExitCode) then exit;
 
-  FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, Output, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + command, Output, Verbose);
   FReturnOutput := Output;
+  if (ReturnCode=AbortedExitCode) then exit;
 
   // If command fails, e.g. due to misconfigured firewalls blocking ICMP etc, retry a few times
   RetryAttempt := 1;
@@ -757,10 +787,10 @@ begin
   begin
     while (ReturnCode <> 0) and (RetryAttempt < ERRORMAXRETRIES) do
     begin
-      //ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + LocalRepository, Verbose); //attempt again
+      //TInstaller(Parent).ExecuteCommandCompat(DoubleQuoteIfNeeded(FRepoExecutable) + ' cleanup --non-interactive ' + DoubleQuoteIfNeeded(LocalRepository), Verbose); //attempt again
       //relax ... ;-)
       Sleep(500);
-      FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, Verbose);
+      FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, Verbose);
       FReturnOutput := Output;
       RetryAttempt := RetryAttempt + 1;
     end;
@@ -778,7 +808,8 @@ begin
     exit;
   end;
 
-  FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' status '+GetProxyCommand+' --depth infinity ' + FLocalRepository, Output, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(FRepoExecutable,['status','--depth','infinity',LocalRepository], Output, Verbose);
+
   FReturnOutput := Output;
   FileList.Clear;
   AllFiles := TStringList.Create;
@@ -793,23 +824,20 @@ end;
 
 function TSVNClient.LocalRepositoryExists: boolean;
 const
-  URLTarget = 'URL: ';
-  URLLen = Length(URLTarget);
+  URLExpression='https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)';
+  SVNExpression='svn:\/\/svn\.[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)';
 var
   Output: string = '';
   URL: string;
-  URLPos: integer;
+  URLExtr: TRegExpr;
 begin
-
   Result := false;
+  FReturnCode := 0;
+  if ExportOnly then exit;
+  if NOT ValidClient then exit;
+  if NOT DirectoryExists(LocalRepository) then exit;
 
-  if ExportOnly then
-  begin
-    FReturnCode := 0;
-    exit;
-  end;
-
-  FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' info ' + FLocalRepository, Output, Verbose);
+  FReturnCode := TInstaller(Parent).ExecuteCommand(FRepoExecutable,['info',LocalRepository],Output,Verbose);
   FReturnOutput := Output;
 
   // If command fails due to wrong version, try again
@@ -818,32 +846,55 @@ begin
     // svn: E155036: Please see the 'svn upgrade' command
     // svn: E155036: The working copy is too old to work with client. You need to upgrade the working copy first
     // Let's try one time upgrade to fix it (don't update FReturnCode here)
-    if Pos('E155036', Output) > 0 then ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' upgrade --non-interactive ' + FLocalRepository, Verbose);
+    if Pos('E155036', Output) > 0 then TInstaller(Parent).ExecuteCommand(FRepoExecutable,['upgrade','--non-interactive',LocalRepository],Verbose);
     //Give everybody a chance to relax ;)
     Sleep(500);
     //attempt again
-    FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' info ' + FLocalRepository, Output, Verbose);
+    FReturnCode := TInstaller(Parent).ExecuteCommand(FRepoExecutable,['info',LocalRepository],Output,Verbose);
     FReturnOutput := Output;
   end;
 
   // This is already covered by setting stuff to false first
   //if Pos('is not a working copy', Output.Text) > 0 then result:=false;
-  if Pos('Path', Output) > 0 then
+  if (Pos('Path', Output) > 0) then
   begin
     // There is an SVN repository here.
     // Output from info command can include:
     // URL: http://svn.freepascal.org/svn/fpc/branches/fixes_3_0
     // Repository URL might differ from the one we've set though
-    URLPos := pos(URLTarget, Output) + URLLen;
-    URL := IncludeTrailingSlash(trim(copy(Output, (URLPos), Posex(LineEnding, Output, URLPos) - URLPos)));
-    if FRepositoryURL = '' then
+    // Parse the URL
+
+    URL:='';
+
+    URLExtr := TRegExpr.Create;
+    try
+      URLExtr.Expression := URLExpression;
+      if URLExtr.Exec(Output) then
+      begin
+        URL := URLExtr.Match[0];
+      end;
+      if (URL='') then
+      begin
+        URLExtr.Expression := SVNExpression;
+        if URLExtr.Exec(Output) then
+        begin
+          URL := URLExtr.Match[0];
+        end;
+      end;
+    finally
+      URLExtr.Free;
+    end;
+
+    URL:=IncludeTrailingSlash(URL);
+
+    if Repository = '' then
     begin
-      FRepositoryURL := URL;
+      Repository := URL;
       Result := true;
     end
     else
     begin
-      if StripUrl(FRepositoryURL) = StripUrl(URL) then
+      if StripUrl(Repository) = StripUrl(URL) then
       begin
         Result := true;
       end
@@ -855,7 +906,7 @@ begin
         FLocalRevision := FRET_UNKNOWN_REVISION;
         FLocalRevisionWholeRepo := FRET_UNKNOWN_REVISION;
         FReturnCode := FRET_LOCAL_REMOTE_URL_NOMATCH;
-        FRepositoryURL := URL;
+        Repository := URL;
       end;
     end;
   end;
@@ -886,7 +937,7 @@ begin
   begin
     if ExportOnly then
        begin
-         if (FDesiredRevision = '') or (trim(FDesiredRevision) = 'HEAD') then
+         if (DesiredRevision = '') or (trim(DesiredRevision) = 'HEAD') then
             begin
 
               Command := '';
@@ -899,7 +950,7 @@ begin
                 Command:=' --username '+UserName+' --password '+Password;
               end;
 
-              Command:=' info '+GetProxyCommand + Command + ' --non-interactive --trust-server-cert ' + FRepositoryURL;
+              Command:=' info '+GetProxyCommand + Command + ' --non-interactive --trust-server-cert ' + Repository;
 
               {$IFNDEF MSWINDOWS}
               // due to the fact that strnew returns nil for an empty string, we have to use something special to process a command with empty strings on non windows systems
@@ -907,16 +958,15 @@ begin
               if Pos('emptystring',Command)>0 then
               begin
                 Command:=StringReplace(Command,'emptystring','""',[rfReplaceAll,rfIgnoreCase]);
-                TempOutputFile := GetTempFileNameExt('','FPCUPTMP','svn');
+                TempOutputFile:=ChangeFileExt(GetTempFileName(GetTempDir(false),'FPCUPTMP'),'svn');
                 Command:=Command+' &> '+TempOutputFile;
                 ExecuteSpecialDue2EmptyString:=True;
               end;
               {$ENDIF}
 
-              {$IFNDEF MSWINDOWS}
+              {$IFDEF UNIX}
               if ExecuteSpecialDue2EmptyString then
               begin
-                if Verbose then infoln('Executing: '+FRepoExecutable+' '+Command);
                 //FReturnCode := ExecuteProcess(FRepoExecutable,Command,[]);
                 //FReturnCode := FpExecL(FRepoExecutable,[Command]);
                 //FReturnCode := FpExecL('/bin/sh',['-c',Command]);
@@ -929,10 +979,6 @@ begin
                   try
                     TempOutputSL.LoadFromFile(TempOutputFile);
                     Output:=TempOutputSL.ToString;
-                    if Verbose then
-                    begin
-                      for i:=0 to (TempOutputSL.Count-1) do infoln(TempOutputSL[i]);
-                    end;
                   finally
                     TempOutputSL.Free;
                   end;
@@ -941,47 +987,57 @@ begin
               end
               else
               {$ENDIF}
-              FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, Verbose);
+              FReturnCode := TInstaller(Parent).ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + Command, Output, False);
             end
             else
             begin
-              FLocalRevision := FDesiredRevision;
-              FLocalRevisionWholeRepo := FDesiredRevision;
+              FLocalRevision := DesiredRevision;
+              FLocalRevisionWholeRepo := DesiredRevision;
               FReturnCode := 0;
               exit;
             end;
        end
-       else FReturnCode := ExecuteCommand(DoubleQuoteIfNeeded(FRepoExecutable) + ' info ' + FLocalRepository, Output, Verbose);
+       else FReturnCode := TInstaller(Parent).ExecuteCommand(FRepoExecutable,['info',LocalRepository],Output,False);
+
 
     FReturnOutput := Output;
     // Could have used svnversion but that would have meant calling yet another command...
     // Get the part after "Revision:"...
     // unless we're in a branch/tag where we need "Last Changed Rev: "
-    if FReturnCode = 0 then
+    if (FReturnCode=0) then
     begin
       // Use regex to try and extract from localized SVNs:
       // match exactly 2 occurences of the revision regex.
       RevCount := 0;
-      RevExtr := TRegExpr.Create;
-      try
-        RevExtr.Expression := RevExpression;
-        if RevExtr.Exec(Output) then
-        begin
-          Inc(RevCount);
-          FLocalRevisionWholeRepo := RevExtr.Match[1];
-          if FLocalRevisionWholeRepo = '' then
-            FLocalRevisionWholeRepo := FRET_UNKNOWN_REVISION;
-          if RevExtr.ExecNext then
+      if (Length(Output)>0) then
+      begin
+        RevExtr := TRegExpr.Create;
+        try
+          RevExtr.Expression := RevExpression;
+          if RevExtr.Exec(Output) then
           begin
-            Inc(RevCount); //we only have valid revision info when we get both repo and branch revision...
-            FLocalRevision := RevExtr.Match[1];
-            if FLocalRevision = '' then
-              FLocalRevision := FRET_UNKNOWN_REVISION;
+            Inc(RevCount);
+            FLocalRevisionWholeRepo := RevExtr.Match[1];
+            if FLocalRevisionWholeRepo = '' then
+              FLocalRevisionWholeRepo := FRET_UNKNOWN_REVISION;
+            if RevExtr.ExecNext then
+            begin
+              Inc(RevCount); //we only have valid revision info when we get both repo and branch revision...
+              FLocalRevision := RevExtr.Match[1];
+              if FLocalRevision = '' then
+                FLocalRevision := FRET_UNKNOWN_REVISION;
+            end;
           end;
+        finally
+          RevExtr.Free;
         end;
-      finally
-        RevExtr.Free;
       end;
+      if RevCount=0 then
+      begin
+        FLocalRevision := FRET_UNKNOWN_REVISION;
+        FLocalRevisionWholeRepo := FRET_UNKNOWN_REVISION;
+      end
+      else
       if RevCount <> 2 then
       begin
         // Regex failed; trying for English revision message (though this may be
@@ -1010,15 +1066,15 @@ end;
 
 function TSVNClient.GetProxyCommand: string;
 begin
-  if FHTTPProxyHost<>'' then
+  if HTTPProxyHost<>'' then
   begin
-    result:='--config-option servers:global:http-proxy-host='+FHTTPProxyHost;
-    if FHTTPProxyPort<>0 then
-      result:=result+' --config-option servers:global:http-proxy-port='+IntToStr(FHTTPProxyPort);
-    if FHTTPProxyUser<>'' then
-      result:=result+' --config-option servers:global:http-proxy-username='+FHTTPProxyUser;
-    if FHTTPProxyPassword<>'' then
-      result:=result+' --config-option servers:global:http-proxy-password='+FHTTPProxyPassword;
+    result:='--config-option servers:global:http-proxy-host='+HTTPProxyHost;
+    if HTTPProxyPort<>0 then
+      result:=result+' --config-option servers:global:http-proxy-port='+IntToStr(HTTPProxyPort);
+    if HTTPProxyUser<>'' then
+      result:=result+' --config-option servers:global:http-proxy-username='+HTTPProxyUser;
+    if HTTPProxyPassword<>'' then
+      result:=result+' --config-option servers:global:http-proxy-password='+HTTPProxyPassword;
     //result:=result+' ';
   end
   else
@@ -1037,17 +1093,6 @@ function TSVNClient.GetLocalRevisionWholeRepo: string;
 begin
   GetLocalRevisions;
   Result := FLocalRevisionWholeRepo;
-end;
-
-
-constructor TSVNClient.Create;
-begin
-  inherited Create;
-end;
-
-destructor TSVNClient.Destroy;
-begin
-  inherited Destroy;
 end;
 
 end.

@@ -12,7 +12,7 @@
  *   General Public License for more details.                              *
  *                                                                         *
  *   A copy of the GNU General Public License is available on the World    *
- *   Wide Web at <http://www.gnu.org/copyleft/gpl.html>. You can also      *
+ *   Wide Web at <https://www.gnu.org/copyleft/gpl.html>. You can also      *
  *   obtain it by writing to the Free Software Foundation,                 *
  *   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.        *
  *                                                                         *
@@ -65,7 +65,7 @@ type
 
   TAboutForm = class(TForm)
     CloseButton: TBitBtn;
-    BuildDateLabel: TLABEL;
+    BuildDateLabel: TLabel;
     AboutMemo: TMemo;
     DocumentationLabel: TLabel;
     ForumLabel: TLabel;
@@ -82,12 +82,12 @@ type
     PlatformLabel: TLabel;
     VersionLabel: TLABEL;
     Notebook: TPageControl;
-    AboutPage: TTabSheet;
+    CreditsPage: TTabSheet;
     procedure AboutFormCreate(Sender:TObject);
-    procedure URLLabelMouseDown(Sender: TObject; {%H-}Button: TMouseButton;
+    procedure LabelMouseDown(Sender: TObject; {%H-}Button: TMouseButton;
       {%H-}Shift: TShiftState; {%H-}X, {%H-}Y: Integer);
-    procedure URLLabelMouseEnter(Sender: TObject);
-    procedure URLLabelMouseLeave(Sender: TObject);
+    procedure LabelMouseEnter(Sender: TObject);
+    procedure LabelMouseLeave(Sender: TObject);
   private
     Acknowledgements: TScrollingText;
     Contributors: TScrollingText;
@@ -103,11 +103,17 @@ implementation
 
 {$R *.lfm}
 
+uses
+  InterfaceBase;
+
+{$i revision.inc}
+
 function ShowAboutForm: TModalResult;
 var
   AboutForm: TAboutForm;
 begin
   AboutForm:=TAboutForm.Create(nil);
+  AboutForm.SetFocusedControl(AboutForm.CloseButton);
   Result:=AboutForm.ShowModal;
   AboutForm.Free;
 end;
@@ -137,19 +143,28 @@ procedure TAboutForm.AboutFormCreate(Sender:TObject);
 begin
   Notebook.PageIndex:=0;
   LogoImage.Picture.LoadFromResourceName(HInstance, 'splash_logo', TPortableNetworkGraphic);
-  VersionLabel.Caption := '';
+  VersionLabel.Caption :='FPCUPdeluxe V'+DELUXEVERSION+' build '+RevisionStr;
+;
   //RevisionLabel.Caption := '';
   BuildDateLabel.Caption := 'Build-date: '+GetLocalizedBuildDate;
-  FPCVersionLabel.Caption:= '';
-  PlatformLabel.Caption:= '';
+
+  FPCVersionLabel.Caption:= Format('%s-%s-%s, fpc %s', [
+    LowerCase({$I %FPCTARGETOS%}),
+    {$I %FPCTARGETCPU%},
+    GetLCLWidgetTypeName,
+    {$I %FPCVersion%}
+    ]);
+
+
+  PlatformLabel.Caption:= 'https://github.com/newpascal/fpcupdeluxe/releases/latest';
 
   // Reinier Olislagers
   // 4-dec-2014
 
   //VersionPage.Caption:='';
-  //AboutPage.Caption:='';
+  //CreditsPage.Caption:='';
 
-  VersionLabel.Font.Color:= clWhite;
+  //VersionLabel.Font.Color:= clWhite;
 
   Constraints.MinWidth:= 460;
   Constraints.MinHeight:= 380;
@@ -157,31 +172,31 @@ begin
   Height:= 380;
 
   OfficialLabel.Caption := 'Source';
-  OfficialURLLabel.Caption := 'https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/';
+  OfficialURLLabel.Caption := 'https://github.com/LongDirtyAnimAlf/Reiniero-fpcup';
   DocumentationLabel.Caption := 'Wiki';
-  DocumentationURLLabel.Caption := 'http://wiki.lazarus.freepascal.org/fpcup';
+  DocumentationURLLabel.Caption := 'https://wiki.lazarus.freepascal.org/fpcup';
   ForumLabel.Caption := 'Forum';
-  ForumURLLabel.Caption := 'http://forum.lazarus.freepascal.org/index.php/topic,34645.0.html';
+  ForumURLLabel.Caption := 'https://forum.lazarus.freepascal.org/index.php/topic,34645.0.html';
   ReinierLabel.Caption := 'Reinier';
-  ReinierURLLabel.Caption := 'http://forum.lazarus.freepascal.org/index.php/topic,26726.0.html';
+  ReinierURLLabel.Caption := 'https://forum.lazarus.freepascal.org/index.php/topic,26726.0.html';
 
   CloseButton.Caption:='Close';
 end;
 
-procedure TAboutForm.URLLabelMouseDown(Sender: TObject;
+procedure TAboutForm.LabelMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
   OpenURL(TLabel(Sender).Caption);
 end;
 
-procedure TAboutForm.URLLabelMouseLeave(Sender: TObject);
+procedure TAboutForm.LabelMouseLeave(Sender: TObject);
 begin
   TLabel(Sender).Font.Style := [];
   TLabel(Sender).Font.Color := clBlue;
   TLabel(Sender).Cursor := crDefault;
 end;
 
-procedure TAboutForm. URLLabelMouseEnter(Sender: TObject);
+procedure TAboutForm. LabelMouseEnter(Sender: TObject);
 begin
   TLabel(Sender).Font.Style := [fsUnderLine];
   TLabel(Sender).Font.Color := clRed;
@@ -264,7 +279,7 @@ begin
       else
       begin
         //check for url
-        if Pos('http://', s) = 1 then
+        if Pos('https://', s) = 1 then
         begin
           if i = FActiveLine then
           begin
@@ -290,7 +305,7 @@ end;
 function TScrollingText.ActiveLineIsURL: boolean;
 begin
   if (FActiveLine > 0) and (FActiveLine < FLines.Count) then
-    Result := Pos('http://', FLines[FActiveLine]) = 1
+    Result := Pos('https://', FLines[FActiveLine]) = 1
   else
     Result := False;
 end;

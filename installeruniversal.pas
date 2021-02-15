@@ -30,6 +30,7 @@ Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 }
 
 {$mode objfpc}{$H+}
+
 {$modeswitch advancedrecords}
 
 interface
@@ -65,9 +66,8 @@ type
 
   { TUniversalInstaller }
 
-  TUniversalInstaller = class(TInstaller)
+  TUniversalInstaller = class(TBaseUniversalInstaller)
   private
-    FBinPath:string; //Path where compiler is
     // FPC base directories
     FFPCSourceDir:string;
     FFPCInstallDir:string;
@@ -109,7 +109,7 @@ type
     // Scans for and removes all packages specfied in a (module's) stringlist with commands:
     function RemovePackages(sl:TStringList): boolean;
     // Uninstall a single package:
-    function UnInstallPackage(PackagePath: string): boolean;
+    function UnInstallPackage(PackagePath, WorkingDir: string): boolean;
     {$endif}
     // Filters (a module's) sl stringlist and runs all <Directive> commands:
     function RunCommands(Directive:string;sl:TStringList):boolean;
@@ -126,7 +126,7 @@ type
     property LazarusSourceDir:string read FLazarusSourceDir write FLazarusSourceDir;
     property LazarusInstallDir:string read FLazarusInstallDir write FLazarusInstallDir;
     // LCL widget set to be built
-    property LCL_Platform: string read FLCL_Platform write FLCL_Platform;
+    property LCL_Platform: string write FLCL_Platform;
     {$endif}
     // Build module
     function BuildModule(ModuleName:string): boolean; override;
@@ -136,13 +136,34 @@ type
     function ConfigModule(ModuleName:string): boolean; override;
     // Install/update sources (e.g. via svn)
     function GetModule(ModuleName:string): boolean; override;
-    // Gets the list of required modules for ModuleName
-    function GetModuleRequirements(ModuleName:string; var RequirementList:TStringList): boolean;
     // Uninstall module
     function UnInstallModule(ModuleName:string): boolean; override;
-    constructor Create;
-    destructor Destroy; override;
   end;
+
+  { TmORMotPXLInstaller }
+  TmORMotPXLInstaller = class(TUniversalInstaller)
+  public
+    function BuildModule(ModuleName: string): boolean; override;
+  end;
+
+  { TAWGGInstaller }
+  TAWGGInstaller = class(TUniversalInstaller)
+  public
+    function BuildModule(ModuleName: string): boolean; override;
+  end;
+
+  { TPas2jsInstaller }
+  TPas2jsInstaller = class(TUniversalInstaller)
+  public
+    function BuildModule(ModuleName: string): boolean; override;
+  end;
+
+  { TInternetToolsInstaller }
+  TInternetToolsInstaller = class(TUniversalInstaller)
+  public
+    function GetModule(ModuleName: string): boolean; override;
+  end;
+
 
   // Gets the list of modules enabled in ConfigFile. Appends to existing TStringList
   function GetModuleEnabledList(var ModuleList:TStringList):boolean;
@@ -154,12 +175,10 @@ type
   //The keyword 'list' is reserved and returns the list of keywords as commatext
   function GetAlias(aDictionary,aKeyword: string): string;
   function GetKeyword(aDictionary,aAlias: string): string;
+  function SetAlias(aDictionary,aKeyWord,aValue: string):boolean;
   // check if enabled modules are allowed !
   function CheckIncludeModule(ModuleName: string):boolean;
   function SetConfigFile(aConfigFile: string):boolean;
-  function GetCPUOSCombo(aCPU,aOS:string):TCPUOS;
-  function GetARMArch(aARMArch:string):TARMARCH;
-  function GetARMArchFPCDefine(aARMArch:TARMARCH):string;
 
 var
   sequences:string;
@@ -177,14 +196,19 @@ Const
 implementation
 
 uses
-  StrUtils, typinfo,inifiles, FileUtil, fpcuputil, process;
+  StrUtils, typinfo,inifiles, process,
+  FileUtil,
+  fpcuputil;
 
 Const
-  MAXSYSMODULES=200;
+  MAXSYSMODULES=250;
   MAXUSERMODULES=20;
   // Allow enough instructions per module:
   MAXINSTRUCTIONS=255;
+  MAXEMPTYINSTRUCTIONS=5;
   MAXRECURSIONS=10;
+  LOCATIONMAGIC='Workingdir';
+  INSTALLMAGIC='Installdir';
 
 var
   CurrentConfigFile:string;
@@ -218,7 +242,7 @@ end;
 {$ifndef FPCONLY}
 function TUniversalInstaller.RebuildLazarus:boolean;
 var
-  s:string;
+  OldPath,s:string;
   LazarusConfig: TUpdateLazConfig;
   i,j:integer;
 begin
@@ -226,50 +250,111 @@ begin
   FLazarusNeedsRebuild:=false;
 
   Processor.Executable := Make;
-  Processor.CurrentDirectory := ExcludeTrailingPathDelimiter(LazarusInstallDir);
-  Processor.Parameters.Clear;
-  //if ((FCPUCount>1) AND (NOT FNoJobs)) then Processor.Parameters.Add('--jobs='+IntToStr(FCPUCount));
-  Processor.Parameters.Add('FPC=' + FCompiler);
-  Processor.Parameters.Add('PP=' + ExtractFilePath(FCompiler)+GetCompilerName(GetTargetCPU));
-  Processor.Parameters.Add('USESVN2REVISIONINC=0');
-  Processor.Parameters.Add('--directory=.');
+  Processor.Process.Parameters.Clear;
+  {$IFDEF MSWINDOWS}
+  if Length(Shell)>0 then Processor.Process.Parameters.Add('SHELL='+Shell);
+  {$ENDIF}
+
+  Processor.Process.CurrentDirectory := ExcludeTrailingPathDelimiter(LazarusSourceDir);
+  Processor.Process.Parameters.Add('--directory=' + Processor.Process.CurrentDirectory);
+
+  {$IF DEFINED(CPUARM) AND DEFINED(LINUX)}
+  Processor.Process.Parameters.Add('--jobs=1');
+  {$ELSE}
+  //Still not clear if jobs can be enabled for Lazarus make builds ... :-|
+  //if (NOT FNoJobs) then
+  //  Processor.Process.Parameters.Add('--jobs='+IntToStr(FCPUCount));
+  {$ENDIF}
+
+  Processor.Process.Parameters.Add('FPC=' + FCompiler);
+  Processor.Process.Parameters.Add('PP=' + ExtractFilePath(FCompiler)+GetCompilerName(GetTargetCPU));
+  Processor.Process.Parameters.Add('USESVN2REVISIONINC=0');
+
+  Processor.Process.Parameters.Add('PREFIX='+ExcludeTrailingPathDelimiter(LazarusInstallDir));
+  Processor.Process.Parameters.Add('INSTALL_PREFIX='+ExcludeTrailingPathDelimiter(LazarusInstallDir));
+  Processor.Process.Parameters.Add('LAZARUS_INSTALL_DIR='+IncludeTrailingPathDelimiter(LazarusInstallDir));
+
   //Make sure our FPC units can be found by Lazarus
-  Processor.Parameters.Add('FPCDIR=' + ExcludeTrailingPathDelimiter(FPCSourceDir));
+  Processor.Process.Parameters.Add('FPCDIR=' + ExcludeTrailingPathDelimiter(FPCSourceDir));
+
   //Make sure Lazarus does not pick up these tools from other installs
-  Processor.Parameters.Add('FPCMAKE=' + IncludeTrailingPathDelimiter(FPCInstallDir)+'bin'+DirectorySeparator+GetFPCTarget(true)+DirectorySeparator+'fpcmake'+GetExeExt);
-  Processor.Parameters.Add('PPUMOVE=' + IncludeTrailingPathDelimiter(FPCInstallDir)+'bin'+DirectorySeparator+GetFPCTarget(true)+DirectorySeparator+'ppumove'+GetExeExt);
-  Processor.Parameters.Add('CFGFILE=' + IncludeTrailingPathDelimiter(LazarusPrimaryConfigPath)+DefaultIDEMakeOptionFilename);
+  Processor.Process.Parameters.Add('FPCMAKE=' + FBinPath+'fpcmake'+GetExeExt);
+  Processor.Process.Parameters.Add('PPUMOVE=' + FBinPath+'ppumove'+GetExeExt);
 
-  {$ifdef Windows}
-  Processor.Parameters.Add('UPXPROG=echo');      //Don't use UPX
-  Processor.Parameters.Add('COPYTREE=echo');     //fix for examples in Win svn, see build FAQ
-  {$endif}
+  s:=IncludeTrailingPathDelimiter(LazarusPrimaryConfigPath)+DefaultIDEMakeOptionFilename;
+  //if FileExists(s) then
+    Processor.Process.Parameters.Add('CFGFILE=' + s);
 
-  if FLCL_Platform <> '' then
-    Processor.Parameters.Add('LCL_PLATFORM=' + FLCL_Platform);
+  {$IFDEF MSWINDOWS}
+  Processor.Process.Parameters.Add('UPXPROG=echo');      //Don't use UPX
+  {$else}
+  //Processor.Process.Parameters.Add('INSTALL_BINDIR='+FBinPath);
+  {$ENDIF MSWINDOWS}
+
+  if FLCL_Platform <> '' then Processor.Process.Parameters.Add('LCL_PLATFORM=' + FLCL_Platform);
 
   //Set options
   s := FLazarusCompilerOptions;
+
+  {$ifdef Unix}
+    {$ifndef Darwin}
+      {$ifdef LCLQT}
+      {$endif}
+      {$ifdef LCLQT5}
+        // Did we copy the QT5 libs ??
+        // If so, add some linker help.
+        if (NOT LibWhich(LIBQT5)) AND (FileExists(IncludeTrailingPathDelimiter(LazarusInstallDir)+LIBQT5)) then
+        begin
+          s:=s+' -k"-rpath=./"';
+          s:=s+' -k"-rpath=$$ORIGIN"';
+          s:=s+' -k"-rpath=\\$$$$$\\ORIGIN"';
+          s:=s+' -Fl'+ExcludeTrailingPathDelimiter(LazarusInstallDir);
+        end;
+      {$endif}
+    {$endif}
+  {$endif}
+
   while Pos('  ',s)>0 do
   begin
     s:=StringReplace(s,'  ',' ',[rfReplaceAll]);
   end;
   s:=Trim(s);
-  if Length(s)>0 then Processor.Parameters.Add('OPT='+s);
 
-  Processor.Parameters.Add('useride');
+  if Length(s)>0 then Processor.Process.Parameters.Add('OPT='+s);
+
+  {$ifdef DISABLELAZBUILDJOBS}
+  Processor.Process.Parameters.Add('LAZBUILDJOBS=1');//prevent runtime 217 errors
+  {$else}
+  Processor.Process.Parameters.Add('LAZBUILDJOBS='+IntToStr(FCPUCount));
+  {$endif}
+
+  Processor.Process.Parameters.Add('useride');
 
   try
-    WritelnLog(infotext+Processor.Executable+'. Params: '+Processor.Parameters.CommaText, true);
-    Processor.Execute;
-    result := Processor.ExitStatus=0;
+    {$ifdef MSWindows}
+    //Prepend FPC binary directory to PATH to prevent pickup of strange tools
+    OldPath:=Processor.Environment.GetVar(PATHVARNAME);
+    s:=ExcludeTrailingPathDelimiter(FBinPath);
+    if OldPath<>'' then
+       Processor.Environment.SetVar(PATHVARNAME, s+PathSeparator+OldPath)
+    else
+      Processor.Environment.SetVar(PATHVARNAME, s);
+    {$endif}
+
+    ProcessorResult:=Processor.ExecuteAndWait;
+    result := (ProcessorResult=0);
     if result then
     begin
-      infoln(infotext+'Lazarus rebuild succeeded',etDebug);
+      Infoln(infotext+'Lazarus rebuild succeeded',etDebug);
     end
     else
       WritelnLog(etError,infotext+'Failure trying to rebuild Lazarus. '+LineEnding+
         'Details: '+FErrorLog.Text,true);
+
+    {$ifdef MSWindows}
+    Processor.Environment.SetVar(PATHVARNAME, OldPath);
+    {$endif}
+
   except
     on E: Exception do
     begin
@@ -300,7 +385,7 @@ begin
         // Change the build modes to reflect the default LCL widget set.
         for j:=0 to (i-1) do
         begin
-          infoln(infotext+'Changing default LCL_platforms for build-profiles in '+MiscellaneousConfig+' to build for '+FLCL_Platform, etInfo);
+          Infoln(infotext+'Changing default LCL_platforms for build-profiles in '+MiscellaneousConfig+' to build for '+FLCL_Platform, etInfo);
           LazarusConfig.SetVariable(MiscellaneousConfig, 'MiscellaneousOptions/BuildLazarusOptions/Profiles/Profile'+InttoStr(j)+'/LCLPlatform/Value', FLCL_Platform);
         end;
       end;
@@ -328,7 +413,7 @@ begin
     s:=sl[i];
     if (copy(UpperCase(s),1, length(Key))=Key) and ((s[length(Key)+1]='=') or (s[length(Key)+1]=' ')) then
       begin
-      if pos('=',s)>0 then
+      if Pos('=',s)>0 then
         s:=trim(copy(s,pos('=',s)+1,length(s)));
       break;
       end;
@@ -341,7 +426,7 @@ begin
       if (copy(UpperCase(s),1, length(Key))=Key) and ((s[length(Key)+1]='=') or
         (s[length(Key)+1]=' ')) then
         begin
-        if pos('=',s)>0 then
+        if Pos('=',s)>0 then
           s:=trim(copy(s,pos('=',s)+1,length(s)));
         break;
         end;
@@ -350,11 +435,11 @@ begin
 //expand macros
   doublequote:=true;
   if s<>'' then
-    while pos('$(',s)>0 do
+    while Pos('$(',s)>0 do
     begin
       i:=pos('$(',s);
       macro:=copy(s,i+2,length(s));
-      if pos(')',macro)>0 then
+      if Pos(')',macro)>0 then
         begin
         delete(macro,pos(')',macro),length(macro));
         macro:=UpperCase(macro);
@@ -364,7 +449,7 @@ begin
         if macro='BASEDIR' then
           macro:=ExcludeTrailingPathDelimiter(FBaseDirectory)
         else if macro='FPCDIR' then
-          macro:=ExcludeTrailingPathDelimiter(FFPCInstallDir)
+          macro:=ExcludeTrailingPathDelimiter(FPCInstallDir)
         else if macro='FPCBINDIR' then
             macro:=ExcludeTrailingPathDelimiter(FBinPath)
         else if macro='FPCBIN' then
@@ -405,6 +490,19 @@ begin
           macro:='rm -Rf';
           {$ENDIF}
         end
+        else if macro='TERMINAL' then
+        begin
+          doublequote:=false;
+          {$ifdef  MSWINDOWS}
+          macro:=GetEnvironmentVariable('COMSPEC');
+          if NOT FileExists(macro) then macro:='c:\windows\system32\cmd.exe';
+          if NOT FileExists(macro) then macro:='' else macro:=macro+' /c';
+          {$endif  MSWINDOWS}
+          {$ifdef UNIX}
+          macro := '/bin/sh';
+          if NOT FileExists(macro) then macro:='' else macro:=macro+' -c';
+          {$endif UNIX}
+        end
         else if macro='REMOVEINSTALLDIRECTORY' then
         begin
           doublequote:=false;
@@ -419,7 +517,7 @@ begin
         // quote if containing spaces
         if doublequote then
         begin
-          //if pos(' ',macro)>0 then macro:='"'+macro+'"';
+          //if Pos(' ',macro)>0 then macro:='"'+macro+'"';
           macro:=MaybeQuoted(macro);
         end;
         delete(s,i,len);
@@ -435,44 +533,40 @@ begin
     len:=1;
     {$ENDIF}
     for i:=len to length(s) do
-      if ((s[i]='/') or (s[i]='\')){$IFDEF MSWINDOWS} AND (s[i-1]<>' '){$ENDIF} then
+      if (s[i] in ['/','\']){$IFDEF MSWINDOWS} AND (s[i-1]<>' '){$ENDIF} then
         s[i]:=DirectorySeparator;
   end;
   result:=s;
 end;
 
 function TUniversalInstaller.InitModule: boolean;
-var
-  PlainBinPath: string; //the directory above e.g. c:\development\fpc\bin\i386-win32
 begin
   result:=true;
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (InitModule): ';
-  infoln(localinfotext+'Entering ...',etDebug);
-  if InitDone then
-    exit;
-  if FVerbose then
-    Processor.OnOutputM:=@DumpOutput;
+  Infoln(localinfotext+'Entering ...',etDebug);
+  if InitDone then exit;
+
   // While getting svn etc may help a bit, if Lazarus isn't installed correctly,
   // it probably won't help for normal use cases.
   // However, in theory, we could run only external modules and
   // only download some SVN repositories
   // So.. enable this.
   result:=(CheckAndGetTools) AND (CheckAndGetNeededBinUtils);
+
   if not(result) then
-    infoln(localinfotext+'Missing required executables. Aborting.',etError);
+    Infoln(localinfotext+'Missing required executables. Aborting.',etError);
 
   // Add fpc architecture bin and plain paths
-  FBinPath:=IncludeTrailingPathDelimiter(FFPCInstallDir)+'bin'+DirectorySeparator+GetFPCTarget(true);
-  PlainBinPath:=ExcludeTrailingPathDelimiter(FFPCInstallDir);
+  FBinPath:=ConcatPaths([FPCInstallDir,'bin',GetFPCTarget(true)])+DirectorySeparator;
   // Need to remember because we don't always use ProcessEx
-  FPath:=FBinPath+PathSeparator+
+  FPath:=ExcludeTrailingPathDelimiter(FBinPath)+PathSeparator+
   {$IFDEF DARWIN}
   // pwd is located in /bin ... the makefile needs it !!
   // tools are located in /usr/bin ... the makefile needs it !!
   // don't ask, but this is needed when fpcupdeluxe runs out of an .app package ... quirk solved this way .. ;-)
   '/bin'+PathSeparator+'/usr/bin'+PathSeparator+
   {$ENDIF}
-  PlainBinPath+PathSeparator;
+  ExcludeTrailingPathDelimiter(FPCInstallDir)+PathSeparator;
   SetPath(FPath,true,false);
   // No need to build Lazarus IDE again right now; will
   // be changed by buildmodule/configmodule installexecute/
@@ -499,7 +593,7 @@ begin
   result:=false;
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (InstallPackage): ';
 
-  PackageName:=ExtractFileNameWithoutExt(ExtractFileNameOnly(PackagePath));
+  PackageName:=FileNameWithoutExt(PackagePath);
 
   // Convert any relative path to absolute path, if it's not just a file/package name:
   if ExtractFileName(PackagePath)=PackagePath then
@@ -508,6 +602,15 @@ begin
   else
    // Just use absolute path
     PackageAbsolutePath:=SafeExpandFileName(PackagePath);
+
+  // find a package component, if any
+  // all other packages will be ignored
+  if ( (NOT FileExists(PackageAbsolutePath)) AND (Length(WorkingDir)>0) AND DirectoryExists(WorkingDir) ) then
+  begin
+    PackageFiles:=FindAllFiles(WorkingDir, PackageName+'.lpk' , true);
+    if PackageFiles.Count>0 then PackageAbsolutePath:=PackageFiles.Strings[0];
+    PackageFiles.Free;
+  end;
 
   // find a Lazarus component, if any
   // all other packages will be ignored
@@ -526,6 +629,18 @@ begin
     if PackageFiles.Count>0 then PackageAbsolutePath:=PackageFiles.Strings[0];
     PackageFiles.Free;
   end;
+
+  // find a fpcupdeluxe ccr component, if any
+  // all other packages will be ignored
+  {
+  Path:=IncludeTrailingPathDelimiter(FBaseDirectory)+'ccr';
+  if ( (NOT FileExists(PackageAbsolutePath)) AND DirectoryExists(Path) ) then
+  begin
+    PackageFiles:=FindAllFiles(Path, PackageName+'.lpk' , true);
+    if PackageFiles.Count>0 then PackageAbsolutePath:=PackageFiles.Strings[0];
+    PackageFiles.Free;
+  end;
+  }
 
   lpkversion.Name:='unknown';
   if FileExists(PackageAbsolutePath) then
@@ -586,14 +701,17 @@ begin
   Processor.Executable := IncludeTrailingPathDelimiter(LazarusInstallDir)+LAZBUILDNAME+GetExeExt;
 
   RegisterPackageFeature:=false;
-
   // get lazbuild version to see if we can register packages (available from version 1.7 and up)
-  Processor.Parameters.Clear;
-  Processor.Parameters.Add('--version');
+  Processor.Process.Parameters.Clear;
+  Processor.Process.Parameters.Add('--version');
   try
-    Processor.Execute;
-    result := (Processor.ExitStatus=0);
-    if result then RegisterPackageFeature:=(GetNumericalVersion(Processor.OutputString)>=CalculateFullVersion(1,7,0));
+    ProcessorResult:=Processor.ExecuteAndWait;
+    result := (ProcessorResult=0);
+    if result then
+    begin
+      if Processor.WorkerOutput.Count>0 then
+        RegisterPackageFeature:=(CalculateNumericalVersion(Processor.WorkerOutput.Strings[Processor.WorkerOutput.Count-1])>=CalculateFullVersion(1,7,0));
+    end;
   except
     on E: Exception do
     begin
@@ -610,42 +728,44 @@ begin
 
   if RegisterPackageFeature then RegisterPackageFeature:=RegisterOnly;
 
-  Processor.Parameters.Clear;
+  Processor.Process.Parameters.Clear;
   FErrorLog.Clear;
   if WorkingDir<>'' then
-    Processor.CurrentDirectory:=ExcludeTrailingPathDelimiter(WorkingDir);
-  Processor.Parameters.Clear;
+    Processor.Process.CurrentDirectory:=ExcludeTrailingPathDelimiter(WorkingDir);
+  Processor.Process.Parameters.Clear;
   {$IFDEF DEBUG}
-  Processor.Parameters.Add('--verbose');
+  Processor.Process.Parameters.Add('--verbose');
   {$ELSE}
-  Processor.Parameters.Add('--quiet');
+  Processor.Process.Parameters.Add('--quiet');
   {$ENDIF}
-  Processor.Parameters.Add('--pcp=' + DoubleQuoteIfNeeded(FLazarusPrimaryConfigPath));
-  Processor.Parameters.Add('--cpu=' + GetTargetCPU);
-  Processor.Parameters.Add('--os=' + GetTargetOS);
+
+  Processor.Process.Parameters.Add('--pcp=' + DoubleQuoteIfNeeded(FLazarusPrimaryConfigPath));
+  Processor.Process.Parameters.Add('--cpu=' + GetTargetCPU);
+  Processor.Process.Parameters.Add('--os=' + GetTargetOS);
   if FLCL_Platform <> '' then
-            Processor.Parameters.Add('--ws=' + FLCL_Platform);
+            Processor.Process.Parameters.Add('--ws=' + FLCL_Platform);
   if RegisterPackageFeature then
-    Processor.Parameters.Add('--add-package-link')
+    Processor.Process.Parameters.Add('--add-package-link')
   else
-    Processor.Parameters.Add('--add-package');
-  Processor.Parameters.Add(DoubleQuoteIfNeeded(PackageAbsolutePath));
+    Processor.Process.Parameters.Add('--add-package');
+  Processor.Process.Parameters.Add(DoubleQuoteIfNeeded(PackageAbsolutePath));
   try
-    Processor.Execute;
-    result := Processor.ExitStatus=0;
+    ProcessorResult:=Processor.ExecuteAndWait;
+    result := (ProcessorResult=0);
+
     // runtime packages will return false, but output will have info about package being "only for runtime"
     if result then
     begin
       if (NOT RegisterPackageFeature) then
       begin
-        infoln('Marking Lazarus for rebuild based on package install for '+PackageAbsolutePath,etDebug);
+        Infoln('Marking Lazarus for rebuild based on package install for '+PackageAbsolutePath,etDebug);
         FLazarusNeedsRebuild:=true; //Mark IDE for rebuild
       end;
     end
     else
     begin
       // if the package is only for runtime, just add an lpl file to inform Lazarus of its existence and location ->> set result to true
-      if (Pos('only for runtime',Processor.OutputString)>0) OR (RegisterPackageFeature)
+      if (Pos('only for runtime',Processor.WorkerOutput.Text)>0) OR (RegisterPackageFeature) OR (ProcessorResult=4)
          then result:=True
          else WritelnLog(localinfotext+'Error trying to add package '+PackageName+'. Details: '+FErrorLog.Text,true);
     end;
@@ -662,11 +782,7 @@ begin
   if (result) AND (lpkversion.Name<>'unknown') then
   begin
     if FVerbose then WritelnLog(localinfotext+'Checking lpl file for '+PackageName,true);
-    Path := IncludeTrailingPathDelimiter(LazarusInstallDir)+
-            'packager'+DirectorySeparator+
-            'globallinks'+DirectorySeparator+
-            LowerCase(lpkversion.Name)+'-'+lpkversion.AsString+'.lpl';
-
+    Path := ConcatPaths([LazarusInstallDir,'packager','globallinks'])+DirectorySeparator+LowerCase(lpkversion.Name)+'-'+lpkversion.AsString+'.lpl';
     if NOT FileExists(Path) then
     begin
       AssignFile(TxtFile,Path);
@@ -685,7 +801,6 @@ function TUniversalInstaller.RemovePackages(sl: TStringList): boolean;
 const
   // The command that will be processed:
   Directive='AddPackage';
-  Location='Workingdir';
 var
   Failure: boolean;
   i:integer;
@@ -698,8 +813,10 @@ begin
   Failure:=false;
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (RemovePackages): ';
 
-  BaseWorkingdir:=GetValueFromKey(Location,sl);
+  BaseWorkingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+  if BaseWorkingdir='' then BaseWorkingdir:=GetValueFromKey(INSTALLMAGIC,sl);
   BaseWorkingdir:=FixPath(BaseWorkingdir);
+
   Workingdir:=BaseWorkingdir;
 
   for RegisterOnly:=false to true do
@@ -716,7 +833,7 @@ begin
       if i>=0 then
       begin
         RealDirective:=RealDirective+IntToStr(i);
-        Workingdir:=GetValueFromKey(Location+IntToStr(i),sl);
+        Workingdir:=GetValueFromKey(LOCATIONMAGIC+IntToStr(i),sl);
         Workingdir:=FixPath(Workingdir);
       end else
       begin
@@ -726,19 +843,19 @@ begin
       PackagePath:=GetValueFromKey(RealDirective,sl);
       PackagePath:=FixPath(PackagePath);
 
-      // Skip over missing numbers:
-      if PackagePath='' then continue;
+      // Skip over missing data or if no AddPackage is defined
+      if (PackagePath='') then continue;
+
+      if Workingdir='' then Workingdir:=BaseWorkingdir;
+
       if NOT FileExists(PackagePath) then
       begin
-        infoln(localinfotext+'Package '+ExtractFileName(PackagePath)+' not found ... skipping.',etInfo);
-        UnInstallPackage(PackagePath);
+        Infoln(localinfotext+'Package '+ExtractFileName(PackagePath)+' not found ... skipping.',etInfo);
+        UnInstallPackage(PackagePath, WorkingDir);
         continue;
       end;
-      if Workingdir='' then Workingdir:=BaseWorkingdir;
       // Try to uninstall everything, even if some of these fail.
-      // Note: UninstallPackage used to have a WorkingDir parameter but
-      // I'm wondering how to implement that as we have PackagePath already.
-      if UnInstallPackage(PackagePath)=false then Failure:=true;
+      if UnInstallPackage(PackagePath, WorkingDir)=false then Failure:=true;
     end;
     result:=Failure;
   end;
@@ -749,19 +866,21 @@ function TUniversalInstaller.AddPackages(sl:TStringList): boolean;
 const
   // The command that will be processed:
   Directive='AddPackage';
-  LOCATIONMAGIC='Workingdir';
   NAMEMAGIC='Name';
 var
   i:integer;
-  s:string;
+  s,s2:string;
   PackagePath:string;
   ModuleName:string;
   Workingdir:string;
   BaseWorkingdir:string;
   RealDirective:string;
   RegisterOnly:boolean;
+  ReadyCounter:integer;
+
 begin
   BaseWorkingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+  if BaseWorkingdir='' then BaseWorkingdir:=GetValueFromKey(INSTALLMAGIC,sl);;
   BaseWorkingdir:=FixPath(BaseWorkingdir);
   Workingdir:=BaseWorkingdir;
   ModuleName:=GetValueFromKey(NAMEMAGIC,sl);
@@ -770,6 +889,8 @@ begin
 
   for RegisterOnly:=false to true do
   begin
+    //Reset ready counter
+    ReadyCounter:=0;
 
     // trick: run from -1 to allow the above basic statements to be processed first
     for i:=-1 to MAXINSTRUCTIONS do
@@ -793,13 +914,52 @@ begin
       PackagePath:=GetValueFromKey(RealDirective,sl);
       PackagePath:=FixPath(PackagePath);
 
-      // Skip over missing data:
-      if (PackagePath='') then continue;
+      if Workingdir='' then Workingdir:=BaseWorkingdir;
+
+      {$ifndef FPCONLY}
+      if (LowerCase(ModuleName)='lamw-gradle') then
+      begin
+        //perform some auto magic install stuff
+        s:=IncludeTrailingPathDelimiter(FLazarusPrimaryConfigPath)+'LAMW.ini';
+        with TIniFile.Create(s) do
+        try
+          s:=ExcludeTrailingPathDelimiter(WorkingDir);
+          s2:=ReadString('NewProject','PathToGradle','');
+          if (s<>s2) then WriteString('NewProject','PathToGradle',s);
+        finally
+          Free;
+        end;
+      end;
+      if (LowerCase(ModuleName)='lamw-ant') then
+      begin
+        //perform some auto magic install stuff
+        s:=IncludeTrailingPathDelimiter(FLazarusPrimaryConfigPath)+'LAMW.ini';
+        with TIniFile.Create(s) do
+        try
+          s:=ConcatPaths([WorkingDir,'bin']);
+          s2:=ReadString('NewProject','PathToAntBin','');
+          if (s<>s2) then WriteString('NewProject','PathToAntBin',s);
+        finally
+          Free;
+        end;
+      end;
+      {$endif}
+
+      //Limit iterration;
+      if ReadyCounter>MAXEMPTYINSTRUCTIONS then break;
+
+      // Skip over missing data or if no AddPackage is defined
+      if (PackagePath='') then
+      begin
+        Inc(ReadyCounter);
+        continue;
+      end else ReadyCounter:=0;
+
       if NOT FileExists(PackagePath) then
       begin
-        infoln(localinfotext+'Package '+ExtractFileName(PackagePath)+' not found ... skipping.',etInfo);
+        Infoln(localinfotext+'Package '+ExtractFileName(PackagePath)+' not found ... skipping.',etInfo);
         {$ifndef FPCONLY}
-        UnInstallPackage(PackagePath);
+        UnInstallPackage(PackagePath,Workingdir);
         {$endif}
         continue;
       end;
@@ -808,7 +968,7 @@ begin
       //So, take responsibility of correct install
       //All other packages are users responsibility !
 
-      if LowerCase(ModuleName)='suggestedpackages' then
+      if ModuleName=_SUGGESTED then
       begin
 
         {$ifdef Darwin}
@@ -819,7 +979,7 @@ begin
         if
           (Pos('editormacroscript',PackagePath)>0) then
         begin
-          infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
+          Infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
           continue;
         end;
 
@@ -840,7 +1000,7 @@ begin
             (Pos('lazdbexport',PackagePath)>0)
            ) then
         begin
-          infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
+          Infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
           continue;
         end;
         {$endif}
@@ -852,7 +1012,7 @@ begin
         // so skip in case package was included.
         if (Pos('pascalscript',PackagePath)>0) then
         begin
-          infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
+          Infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
           continue;
         end;
         {$endif}
@@ -862,7 +1022,7 @@ begin
         // so skip in case package was included.
         if (Pos('editormacroscript',PackagePath)>0) then
         begin
-          infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
+          Infoln(localinfotext+'Incompatible package '+ExtractFileName(PackagePath)+' skipped.',etInfo);
           continue;
         end;
         {$endif}
@@ -890,10 +1050,51 @@ begin
       result:=InstallPackage(PackagePath,WorkingDir,RegisterOnly);
       if not result then
       begin
-        infoln(localinfotext+'Error while installing package '+PackagePath+'.',etWarning);
+        Infoln(localinfotext+'Error while installing package '+PackagePath+'.',etWarning);
         if FVerbose then WritelnLog(localinfotext+'Error while installing package '+PackagePath+'.',false);
         break;
       end;
+
+      if result then
+      begin
+        if (LowerCase(ModuleName)='lamw') AND (Pos('amw_ide_tools',LowerCase(PackagePath))>0) then
+        begin
+          //perform some auto magic install stuff
+          s:=IncludeTrailingPathDelimiter(FLazarusPrimaryConfigPath)+'LAMW.ini';
+          with TIniFile.Create(s) do
+          try
+            s:='PathToSmartDesigner';
+            s2:=ReadString('NewProject',s,ConcatPaths([WorkingDir,'android_wizard','smartdesigner']));
+            WriteString('NewProject',s,s2);
+
+            s:='PathToJavaTemplates';
+            s2:=ReadString('NewProject',s,ConcatPaths([WorkingDir,'android_wizard','smartdesigner','java']));
+            WriteString('NewProject',s,s2);
+
+            s:='PathToJavaJDK';
+            s2:=ReadString('NewProject',s,SafeExpandFileName(ExtractFilePath(GetJavac)+'..'));
+            if Length(s2)>0 then WriteString('NewProject',s,s2);
+
+            s:='PathToWorkspace';
+            s2:=ReadString('NewProject',s,ConcatPaths([FBaseDirectory,'projects','LAMWProjects']));
+            ForceDirectoriesSafe(s2);
+            WriteString('NewProject',s,s2);
+
+            s:='InstructionSet';
+            s2:=ReadString('NewProject',s,'2');
+            WriteString('NewProject',s,s2);
+
+            s:='PathToAndroidSDK';
+            s2:=GetAndroidSDKDir;
+            s2:=ReadString('NewProject',s,s2);
+            if DirectoryExists(s2) then WriteString('NewProject',s,s2);
+
+          finally
+            Free;
+          end;
+        end;
+      end;
+
       {$endif}
     end;
   end;
@@ -910,6 +1111,7 @@ var
   Installer: TWinInstaller;
   Workingdir:string;
   BaseWorkingdir:string;
+  ReadyCounter:integer;
 begin
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (CreateInstallers): ';
 
@@ -917,13 +1119,25 @@ begin
   BaseWorkingdir:=GetValueFromKey('Workingdir',sl);
   BaseWorkingdir:=FixPath(BaseWorkingdir);
 
+  ReadyCounter:=0;
+
   for i:=0 to MAXINSTRUCTIONS do
     begin
     if i=0
        then exec:=GetValueFromKey(Directive,sl)
        else exec:=GetValueFromKey(Directive+IntToStr(i),sl);
     // Skip over missing numbers:
-    if exec='' then continue;
+
+    //Limit iterration;
+    if ReadyCounter>MAXEMPTYINSTRUCTIONS then break;
+
+    // Skip over missing data or if no exec is defined
+    if (exec='') then
+    begin
+      Inc(ReadyCounter);
+      continue;
+    end else ReadyCounter:=0;
+
     Workingdir:=GetValueFromKey('Workingdir'+IntToStr(i),sl);
     Workingdir:=FixPath(Workingdir);
     if Workingdir='' then Workingdir:=BaseWorkingdir;
@@ -931,7 +1145,7 @@ begin
       'WINDOWS','WINDOWS32','WIN32','WINX86': {good name};
       else
         begin
-        writelnlog(localinfotext+'Ignoring unknown installer name '+exec+'.',true);
+        WritelnLog(localinfotext+'Ignoring unknown installer name '+exec+'.',true);
         continue;
         end;
     end;
@@ -941,7 +1155,7 @@ begin
     InstallDir:=IncludeTrailingPathDelimiter(SafeExpandFileName(GetValueFromKey('InstallDir',sl)));
     InstallDir:=FixPath(InstallDir);
     if InstallDir<>'' then
-      ForceDirectories(InstallDir);
+      ForceDirectoriesSafe(InstallDir);
     Installer:=TWinInstaller.Create(InstallDir,FCompiler,FVerbose);
     try
       //todo: make installer module-level; split out config from build part; would also require fixed svn dirs etc
@@ -972,19 +1186,31 @@ var
   s:string;
   BaseWorkingdir:string;
   Workingdir:string;
+  ReadyCounter:integer;
 begin
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (RunCommands: '+Directive+'): ';
 
   result:=true; //not finding any instructions at all should not be a problem.
   BaseWorkingdir:=GetValueFromKey('Workingdir',sl);
   BaseWorkingdir:=FixPath(BaseWorkingdir);
+
+  ReadyCounter:=0;
+
   for i:=0 to MAXINSTRUCTIONS do
   begin
     if i=0
        then exec:=GetValueFromKey(Directive,sl)
        else exec:=GetValueFromKey(Directive+IntToStr(i),sl);
-    // Skip over missing numbers:
-    if exec='' then continue;
+
+    //Limit iterration;
+    if ReadyCounter>MAXEMPTYINSTRUCTIONS then break;
+
+    // Skip over missing data or if no exec is defined
+    if (exec='') then
+    begin
+      Inc(ReadyCounter);
+      continue;
+    end else ReadyCounter:=0;
 
     exec:=FixPath(exec);
 
@@ -1002,8 +1228,8 @@ begin
     if j>0 then
     begin
       {$IFDEF MSWINDOWS}
-      j:=Pos(LAZBUILDNAME+'.exe',lowerCase(exec));
-      if j>0 then exec:=StringReplace(exec,LAZBUILDNAME+'.exe',LAZBUILDNAME,[rfIgnoreCase]);
+      j:=Pos(LAZBUILDNAME+GetExeExt,lowerCase(exec));
+      if (j<1) then exec:=StringReplace(exec,LAZBUILDNAME,LAZBUILDNAME+GetExeExt,[rfIgnoreCase]);
       {$ENDIF}
 
       //Set lazbuild options
@@ -1012,55 +1238,68 @@ begin
       {$ELSE}
       s:='--quiet';
       {$ENDIF}
+
       if FLCL_Platform<>'' then s:=s+' --ws=' + FLCL_Platform;
-      exec:=StringReplace(exec,LAZBUILDNAME,LAZBUILDNAME+' '+s,[rfIgnoreCase]);
+      exec:=StringReplace(exec,LAZBUILDNAME+GetExeExt,LAZBUILDNAME+GetExeExt+' '+s,[rfIgnoreCase]);
     end;
     {$endif}
+
     Workingdir:=GetValueFromKey('Workingdir'+IntToStr(i),sl);
     Workingdir:=FixPath(Workingdir);
     if Workingdir='' then Workingdir:=BaseWorkingdir;
-    if FVerbose then WritelnLog(localinfotext+'Running ExecuteCommand[InDir] for '+exec,true);
+
     try
+      s:='';
       result:=false;
-      if Length(WorkingDir)>0 then
-        j:=ExecuteCommandInDir(exec,Workingdir,s,FPath,FVerbose)
-      else
-        j:=ExecuteCommand(exec,s,FVerbose);
+      j:=-1;
+
+      Processor.Process.Parameters.Clear;
+      CommandToList(exec,Processor.Process.Parameters);
+      If Processor.Process.Parameters.Count>0 then
+      begin
+        Processor.Executable:=Processor.Process.Parameters[0];
+        Processor.Process.Parameters.Delete(0);
+      end;
+
+      Processor.Process.CurrentDirectory:=Workingdir;
+
+      ProcessorResult:=Processor.ExecuteAndWait;
+      s:=Processor.WorkerOutput.Text;
+      j:=ProcessorResult;
+
       if j=0 then
       begin
         result:=true;
         {$ifndef FPCONLY}
         // If it is likely user used lazbuid to compile a package, assume
         // it is design-time (except when returning an runtime message) and mark IDE for rebuild
-        if (pos(LAZBUILDNAME,lowerCase(exec))>0) and
+        if (pos(LAZBUILDNAME+GetExeExt,lowerCase(exec))>0) and
           (pos('.lpk',lowercase(exec))>0) and
           (pos('only for runtime',lowercase(s))=0)
         then
         begin
-          infoln(localinfotext+'Marking Lazarus for rebuild based on exec line '+exec,etDebug);
+          Infoln(localinfotext+'Marking Lazarus for rebuild based on exec line '+exec,etDebug);
           FLazarusNeedsRebuild:=true;
         end;
         {$endif}
       end
       else
       begin
-        WritelnLog(etError, localinfotext+'Running '+exec+' returned with an error.',true);
-        WritelnLog(etError, localinfotext+'Error-code: '+InttoStr(j),true);
-        WritelnLog(etError, localinfotext+'Error message (if any): '+s,true);
-        break;
+        WritelnLog(etWarning, localinfotext+'Running '+exec+' returned with an error.',true);
+        WritelnLog(etWarning, localinfotext+'Error-code: '+InttoStr(j),true);
+        if Length(s)>0 then WritelnLog(etWarning, localinfotext+'Error message: '+s,true);
       end;
     except
       on E: Exception do
       begin
-        WritelnLog(etError, localinfotext+'Exception trying to execute '+exec+LineEnding+
-          'Details: '+E.Message,true);
+        WritelnLog(etError, localinfotext+'Exception trying to execute '+exec+LineEnding+'Details: '+E.Message,true);
       end;
     end;
   end;
 end;
 
 {$ifndef FPCONLY}
-function TUniversalInstaller.UnInstallPackage(PackagePath: string): boolean;
+function TUniversalInstaller.UnInstallPackage(PackagePath, WorkingDir: string): boolean;
 const
   PACKAGE_KEYSTART='UserPkgLinks/';
   MISC_KEYSTART='MiscellaneousOptions/BuildLazarusOptions/StaticAutoInstallPackages/';
@@ -1072,16 +1311,18 @@ var
   xmlfile: string;
   lpkdoc:TConfig;
   lpkversion:TAPkgVersion;
+  ReqCount:integer;
+  ReqPackage,Path:string;
 begin
   result:=false;
 
-  PackageName:=ExtractFileNameWithoutExt(ExtractFileNameOnly(PackagePath));
+  PackageName:=FileNameWithoutExt(PackagePath);
 
   localinfotext:=Copy(Self.ClassName,2,MaxInt)+' (UnInstallPackage: '+PackageName+'): ';
 
-  infoln(localinfotext+'Entering ...',etDebug);
+  Infoln(localinfotext+'Entering ...',etDebug);
 
-  infoln(localinfotext+'Removing package from config-files',etInfo);
+  Infoln(localinfotext+'Removing package from config-files',etInfo);
 
   // Convert any relative path to absolute path, if it's not just a file/package name:
   if ExtractFileName(PackagePath)=PackagePath then
@@ -1089,6 +1330,34 @@ begin
   else
     PackageAbsolutePath:=SafeExpandFileName(PackagePath);
   if FVerbose then WritelnLog(localinfotext+'Going to uninstall package',true);
+
+  if (ExtractFileName(PackagePath)<>PackagePath) then
+  begin
+    if FileExists(PackageAbsolutePath) then
+    begin
+      lpkdoc:=TConfig.Create(PackageAbsolutePath);
+      try
+        // get package requirements
+        Path:='Package/RequiredPkgs/';
+        ReqCount:=lpkdoc.GetValue(Path+'Count',0);
+        for i:=1 to ReqCount do
+        begin
+          Path:='Package/RequiredPkgs/';
+          ReqPackage:=lpkdoc.GetValue(Path+'Item'+InttoStr(i)+'/PackageName/Value','unknown');
+          // try to auto-resolve dependencies
+          // not very elegant, but working
+          if (ReqPackage<>'unknown') then
+          begin
+            ReqPackage:=ChangeFileExt(ExtractFileName(ReqPackage), '.lpk');
+            ReqPackage:=FindFileInDir(ReqPackage,WorkingDir);
+            if FileExists(ReqPackage) then UnInstallPackage(ReqPackage, WorkingDir);
+          end;
+        end;
+      finally
+        lpkdoc.Free;
+      end;
+    end;
+  end;
 
   LazarusConfig:=TUpdateLazConfig.Create(FLazarusPrimaryConfigPath);
   try
@@ -1108,7 +1377,7 @@ begin
       end;
       if i>1 then // found
       begin
-        infoln(localinfotext+'Found the package as item '+IntToStr(i)+' ... removing it from '+xmlfile,etInfo);
+        Infoln(localinfotext+'Found the package as item '+IntToStr(i)+' ... removing it from '+xmlfile,etInfo);
         FLazarusNeedsRebuild:=true;
         while i<cnt do
         begin
@@ -1134,22 +1403,22 @@ begin
       end;
       if i>1 then // found
       begin
-        infoln(localinfotext+'Found the package as item '+IntToStr(i)+' ... removing it from '+xmlfile,etInfo);
+        Infoln(localinfotext+'Found the package as item '+IntToStr(i)+' ... removing it from '+xmlfile,etInfo);
         FLazarusNeedsRebuild:=true;
         while i<cnt do
         begin
           value:=LazarusConfig.GetVariable(xmlfile, MISC_KEYSTART+'Item'+IntToStr(i+1)+'/Value');
           LazarusConfig.SetVariable(xmlfile, MISC_KEYSTART+'Item'+IntToStr(i)+'/Value', value);
           // Move does mot work. ToDo !
-          //infoln(localinfotext+'Moving '+MISC_KEYSTART+'Item'+IntToStr(i+1)+' towards '+MISC_KEYSTART+'Item'+IntToStr(i),etDebug);
+          //Infoln(localinfotext+'Moving '+MISC_KEYSTART+'Item'+IntToStr(i+1)+' towards '+MISC_KEYSTART+'Item'+IntToStr(i),etDebug);
           //LazarusConfig.MovePath(xmlfile,
           //  MISC_KEYSTART+'Item'+IntToStr(i+1)+'/',
           //  MISC_KEYSTART+'Item'+IntToStr(i)+'/');
           i:=i+1;
         end;
-        infoln(localinfotext+'Deleting duplicate '+MISC_KEYSTART+'Item'+IntToStr(cnt),etDebug);
+        Infoln(localinfotext+'Deleting duplicate '+MISC_KEYSTART+'Item'+IntToStr(cnt),etDebug);
         LazarusConfig.DeletePath(xmlfile, MISC_KEYSTART+'Item'+IntToStr(cnt)+'/');
-        infoln(localinfotext+'Setting '+MISC_KEYSTART+'Count to '+IntToStr(cnt-1),etDebug);
+        Infoln(localinfotext+'Setting '+MISC_KEYSTART+'Count to '+IntToStr(cnt-1),etDebug);
         LazarusConfig.SetVariable(xmlfile, MISC_KEYSTART+'Count', cnt-1);
       end;
 
@@ -1157,7 +1426,7 @@ begin
       on E: Exception do
       begin
         Result := false;
-        infoln(localinfotext+'Failure setting Lazarus config: ' + E.ClassName + '/' + E.Message, etError);
+        Infoln(localinfotext+'Failure setting Lazarus config: ' + E.ClassName + '/' + E.Message, etError);
       end;
     end;
   finally
@@ -1188,7 +1457,7 @@ begin
                                  'globallinks'+DirectorySeparator+
                                  LowerCase(lpkversion.Name)+'-'+lpkversion.AsString+'.lpl';
           if SysUtils.DeleteFile(PackageAbsolutePath) then
-            infoln(localinfotext+'Package '+PackageAbsolutePath+' deleted',etInfo);
+            Infoln(localinfotext+'Package '+PackageAbsolutePath+' deleted',etInfo);
         end;
       finally
         lpkdoc.Free;
@@ -1212,7 +1481,7 @@ begin
   result:=InitModule;
   if not result then exit;
   // Log to console only:
-  infoln(infotext+'Building module '+ModuleName+'...',etInfo);
+  Infoln(infotext+'Building module '+ModuleName+'...',etInfo);
   idx:=UniModuleList.IndexOf(ModuleName);
   if idx>=0 then
     begin
@@ -1221,13 +1490,13 @@ begin
     // Run all InstallExecute<n> commands:
     // More detailed logging only if verbose or debug:
     if FVerbose then WritelnLog(infotext+'Building module '+ModuleName+' running all InstallExecute commands in: '+LineEnding+
-      sl.text,true);
+      sl.CommaText,true);
     result:=RunCommands('InstallExecute',sl);
 
     // Run all CreateInstaller<n> commands; for now Windows only
     {$IFDEF MSWINDOWS}
     if FVerbose then WritelnLog(infotext+'Building module '+ModuleName+' running all CreateInstaller commands in: '+LineEnding+
-      sl.text,true);
+      sl.CommaText,true);
     result:=CreateInstallers('CreateInstaller',sl, ModuleName);
     {$ENDIF MSWINDOWS}
     end
@@ -1236,38 +1505,21 @@ begin
 end;
 
 function TUniversalInstaller.CleanModule(ModuleName: string): boolean;
-//var
-//  DeleteList:TStringList;
-//  FileCounter:integer;
+var
+  idx:integer;
+  PackageSettings:TStringList;
 begin
+  idx:=UniModuleList.IndexOf(ModuleName);
+  if idx>=0 then
+  begin
+    PackageSettings:=TStringList(UniModuleList.Objects[idx]);
+    FSourceDirectory:=GetValueFromKey('InstallDir',PackageSettings);
+    FSourceDirectory:=FixPath(FSourceDirectory);
+    FSourceDirectory:=ExcludeTrailingPathDelimiter(FSourceDirectory);
+  end;
   result:=inherited;
   result:=InitModule;
   if not result then exit;
-
-  (*
-  if (Length(FSourceDirectory)>0) AND (DirectoryExists(FSourceDirectory)) then
-  begin
-    DeleteList := TStringList.Create;
-    try
-      FindAllFiles(DeleteList,FSourceDirectory, '*.ppu; *.compiled; *.o', True);
-      if DeleteList.Count > 0 then
-      begin
-        for FileCounter := 0 to (DeleteList.Count-1) do
-        begin
-          if Pos(GetTargetCPUOS,DeleteList.Strings[FileCounter])>0 then
-          begin
-            DeleteFile(DeleteList.Strings[FileCounter]);
-            infoln(infotext+'Deleting '+DeleteList.Strings[FileCounter],etDebug);
-          end;
-        end;
-      end;
-    finally
-      DeleteList.Free;
-    end;
-  end;
-  *)
-
-  result:=true;
 end;
 
 // Processes a single module (i.e. section in fpcup.ini)
@@ -1284,12 +1536,15 @@ var
   i,j,k:integer;
   exec,key,counter,oldcounter,filename:string;
   count:integer;
+  ReadyCounter:integer;
 begin
   result:=true;
   //filename:=xmlfile;
   //if rightstr(filename,4)<>'.xml' then
   filename:=xmlfile+'.xml';
   oldcounter:='';
+  ReadyCounter:=0;
+
   for i:=0 to MAXINSTRUCTIONS do
   begin
     // Read command, e.g. AddToHelpOptions1
@@ -1297,8 +1552,17 @@ begin
     if i=0
        then exec:=GetValueFromKey('AddTo'+xmlfile,sl)
        else exec:=GetValueFromKey('AddTo'+xmlfile+IntToStr(i),sl);
-    // Skip over missing numbers:
-    if exec='' then continue;
+
+    //Limit iterration;
+    if ReadyCounter>MAXEMPTYINSTRUCTIONS then break;
+
+    // Skip over missing data or if no exec is defined
+    if (exec='') then
+    begin
+      Inc(ReadyCounter);
+      continue;
+    end else ReadyCounter:=0;
+
     //split off key and value
     j:=1;
     while j<=length(exec) do
@@ -1372,10 +1636,11 @@ begin
       try
         try
           // For security reasons, the files below are the only files we allow adding to/modifying:
-          AddToLazXML('environmentoptions'); //general options
-          AddToLazXML('helpoptions');
-          AddToLazXML('miscellaneousoptions'); //e.g. list of packages to be installed on recompile
-          AddToLazXML('packagefiles'); //e.g. list of available packages
+          AddToLazXML(ExtractFileName(EditorConfig)); //editor options
+          AddToLazXML(ExtractFileName(EnvironmentConfig)); //general options
+          AddToLazXML(ExtractFileName(HelpConfig));
+          AddToLazXML(ExtractFileName(MiscellaneousConfig)); //e.g. list of packages to be installed on recompile
+          AddToLazXML(ExtractFileName(PackageConfig)); //e.g. list of available packages
           // Process special directives
           Directive:=GetValueFromKey('RegisterExternalTool',sl);
           if Directive<>'' then
@@ -1387,9 +1652,7 @@ begin
             i:=cnt;
             while i>0 do
             begin
-              if LazarusConfig.GetVariable(xmlfile,'EnvironmentOptions/ExternalTools/Tool'+IntToStr(i)+'/Title/Value')
-                =ModuleName then
-                  break;
+              if LazarusConfig.GetVariable(xmlfile,'EnvironmentOptions/ExternalTools/Tool'+IntToStr(i)+'/Title/Value')=ModuleName then break;
               i:=i-1;
             end;
             if i<1 then //not found
@@ -1402,7 +1665,7 @@ begin
             key:='EnvironmentOptions/ExternalTools/Tool'+IntToStr(cnt)+'/';
             LazarusConfig.SetVariable(xmlfile,key+'Format/Version','2');
             LazarusConfig.SetVariable(xmlfile,key+'Title/Value',ModuleName);
-            infoln(infotext+'Going to register external tool '+Directive+GetExeExt,etDebug);
+            Infoln(infotext+'Going to register external tool '+Directive+GetExeExt,etDebug);
             LazarusConfig.SetVariable(xmlfile,key+'Filename/Value',Directive+GetExeExt);
 
             // If we're registering external tools, we should look for associated/
@@ -1435,7 +1698,7 @@ begin
             begin
             xmlfile:=HelpConfig;
             key:='Viewers/TChmHelpViewer/CHMHelp/Exe';
-            infoln(infotext+'Going to register help viewer '+Directive+GetExeExt,etDebug);
+            Infoln(infotext+'Going to register help viewer '+Directive+GetExeExt,etDebug);
             LazarusConfig.SetVariable(xmlfile,key,Directive+GetExeExt);
             end;
 
@@ -1443,16 +1706,16 @@ begin
           Directive:=GetValueFromKey('RegisterLazDocPath',sl);
           if Directive<>'' then
             begin
-            infoln(infotext+'Going to add docpath '+Directive,etDebug);
+            Infoln(infotext+'Going to add docpath '+Directive,etDebug);
             LazDocPathAdd(Directive, LazarusConfig);
             end;
         except
           on E: Exception do
           begin
             if Directive='' then
-              writelnlog(etError,infotext+'Exception '+E.ClassName+'/'+E.Message+' configuring module: '+ModuleName, true)
+              WritelnLog(etError,infotext+'Exception '+E.ClassName+'/'+E.Message+' configuring module: '+ModuleName, true)
             else
-              writelnlog(etError,infotext+'Exception '+E.ClassName+'/'+E.Message+' configuring module: '+ModuleName+' (parsing directive:'+Directive+')', true);
+              WritelnLog(etError,infotext+'Exception '+E.ClassName+'/'+E.Message+' configuring module: '+ModuleName+' (parsing directive:'+Directive+')', true);
           end;
         end;
       finally
@@ -1462,14 +1725,14 @@ begin
       // If Lazarus was marked for rebuild, do so:
       if FLazarusNeedsRebuild then
       begin
-        infoln(infotext+'Going to rebuild Lazarus because packages were installed.',etInfo);
+        Infoln(infotext+'Going to rebuild Lazarus because packages were installed.',etInfo);
         result:=RebuildLazarus;
       end;
   end
   else
   begin
     // Could not find module in module list
-    writelnlog(etError, infotext+'Could not find specified module '+ModuleName,true);
+    WritelnLog(etError, infotext+'Could not find specified module '+ModuleName,true);
     result:=false;
   end;
   {$endif}
@@ -1478,9 +1741,9 @@ end;
 // Download from SVN, hg, git for module
 function TUniversalInstaller.GetModule(ModuleName: string): boolean;
 var
-  idx,i,j:integer;
+  idx,i:integer;
   PackageSettings:TStringList;
-  RemoteURL,InstallDir:string;
+  RemoteURL:string;
   BeforeRevision: string='';
   AfterRevision: string='';
   UpdateWarnings: TStringList;
@@ -1488,9 +1751,7 @@ var
   aFile:string;
   ResultCode: longint;
   SourceOK:boolean;
-  PackageName:string;
   aName:string;
-  Direction:string;
 begin
   result:=inherited;
   result:=InitModule;
@@ -1502,281 +1763,319 @@ begin
     PackageSettings:=TStringList(UniModuleList.Objects[idx]);
 
     WritelnLog(infotext+'Getting module '+ModuleName,True);
-    InstallDir:=GetValueFromKey('InstallDir',PackageSettings);
-    InstallDir:=FixPath(InstallDir);
-    InstallDir:=ExcludeTrailingPathDelimiter(InstallDir);
-    FSourceDirectory:=InstallDir;
+    FSourceDirectory:=GetValueFromKey('InstallDir',PackageSettings);
+    FSourceDirectory:=FixPath(FSourceDirectory);
+    FSourceDirectory:=ExcludeTrailingPathDelimiter(FSourceDirectory);
 
-    if InstallDir<>'' then
-      ForceDirectories(InstallDir);
-
-    // Common keywords for all repo methods
-    FDesiredRevision:=GetValueFromKey('Revision',PackageSettings);
-    FDesiredBranch:=GetValueFromKey('Branch',PackageSettings);
-
-    // Handle Git URLs
-    RemoteURL:=GetValueFromKey('GITURL',PackageSettings);
-    if (RemoteURL<>'') AND (NOT SourceOK) then
+    if FSourceDirectory<>'' then
     begin
-      infoln(infotext+'Going to download/update from GIT repository '+RemoteURL,etInfo);
-      infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
-      UpdateWarnings:=TStringList.Create;
-      try
-        FUrl:=RemoteURL;
-        FGitClient.ModuleName:=ModuleName;
-        FGitClient.Verbose:=FVerbose;
-        FGitClient.ExportOnly:=FExportOnly;
-        result:=DownloadFromGit(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
-        SourceOK:=result;
-        if UpdateWarnings.Count>0 then
-        begin
-          WritelnLog(UpdateWarnings.Text);
-        end;
-      finally
-        UpdateWarnings.Free;
-      end;
-      if SourceOK
-         then infoln(infotext+'Download/update from GIT repository ok.',etInfo)
-         else infoln(infotext+'Getting GIT repo failed. Trying another source, if available.',etWarning)
-    end;
+      ForceDirectoriesSafe(FSourceDirectory);
 
+      // Common keywords for all repo methods
+      FDesiredRevision:=GetValueFromKey('Revision',PackageSettings);
+      FDesiredBranch:=GetValueFromKey('Branch',PackageSettings);
 
-    // Handle SVN urls
-    RemoteURL:=GetValueFromKey('SVNURL',PackageSettings);
-    if (RemoteURL<>'') AND (NOT SourceOK) then
-    begin
-      infoln(infotext+'Going to download/update from SVN repository '+RemoteURL,etInfo);
-      infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
-      UpdateWarnings:=TStringList.Create;
-      try
-        FURL:=RemoteURL;
-        FSVNClient.ModuleName:=ModuleName;
-        FSVNClient.Verbose:=FVerbose;
-        FSVNClient.ExportOnly:=FExportOnly;
-        FSVNClient.UserName:=GetValueFromKey('UserName',PackageSettings);
-        FSVNClient.Password:=GetValueFromKey('Password',PackageSettings);
-        result:=DownloadFromSVN(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
-        SourceOK:=(result) AND (DirectoryExists(IncludeTrailingPathDelimiter(FSourceDirectory+'.svn')) OR FExportOnly);
-        if UpdateWarnings.Count>0 then
-        begin
-          WritelnLog(UpdateWarnings.Text);
-        end;
-      finally
-        UpdateWarnings.Free;
-      end;
-      if SourceOK
-         then infoln(infotext+'Download/update from SVN repository ok.',etInfo)
-         else infoln(infotext+'Getting SVN repo failed. Trying another source, if available.',etWarning)
-    end;
-
-    // Handle HG URLs
-    RemoteURL:=GetValueFromKey('HGURL',PackageSettings);
-    if (RemoteURL<>'') AND (NOT SourceOK) then
-    begin
-      infoln(infotext+'Going to download/update from HG repository '+RemoteURL,etInfo);
-      infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
-      UpdateWarnings:=TStringList.Create;
-      try
-        FUrl:=RemoteURL;
-        FHGClient.ModuleName:=ModuleName;
-        FHGClient.Verbose:=FVerbose;
-        FHGClient.ExportOnly:=FExportOnly;
-        result:=DownloadFromHG(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
-        SourceOK:=result;
-        if result=false then
-          WritelnLog(infotext+'HG error downloading from '+RemoteURL+'. Continuing regardless.',true);
-        if UpdateWarnings.Count>0 then
-        begin
-          WritelnLog(UpdateWarnings.Text);
-        end;
-      finally
-        UpdateWarnings.Free;
-      end;
-      if SourceOK
-         then infoln(infotext+'Download/update from HG repository ok.',etInfo)
-         else infoln(infotext+'Getting HG repo failed. Trying another source, if available.',etWarning)
-    end;
-
-    RemoteURL:=GetValueFromKey('ArchiveURL',PackageSettings);
-    if (RemoteURL<>'') AND (NOT SourceOK) then
-    begin
-      infoln(infotext+'Going to download from archive '+RemoteURL,etInfo);
-      aName:=GetFileNameFromURL(RemoteURL);
-      if Length(aName)>0 then aName:=SysUtils.ExtractFileExt(aName);
-      //If no extension, assume zip
-      if Length(aName)=0 then aName:='zip';
-      aFile := GetTempFileNameExt('','FPCUPTMP',aName);
-      WritelnLog(infotext+'Going to download '+RemoteURL+' into '+aFile,false);
-      try
-        result:=Download(FUseWget, RemoteURL, aFile);
-      except
-        on E: Exception do
-        begin
-         result:=false;
-        end;
-      end;
-
-      if result=false then
-         WritelnLog(etError,infotext+'Error downloading from '+RemoteURL+'. Continuing regardless.',True);
-
-      if result then
+      // Handle Git URLs
+      RemoteURL:=GetValueFromKey('GITURL',PackageSettings);
+      if (RemoteURL<>'') AND (NOT SourceOK) then
       begin
-        WritelnLog(infotext+'Download ok',True);
+        Infoln(infotext+'Going to download/update from GIT repository '+RemoteURL,etInfo);
+        Infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
+        UpdateWarnings:=TStringList.Create;
+        try
+          URL:=RemoteURL;
+          GitClient.ModuleName:=ModuleName;
+          GitClient.ExportOnly:=FExportOnly;
+          result:=DownloadFromGit(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
+          SourceOK:=(result) AND (DirectoryExists(IncludeTrailingPathDelimiter(FSourceDirectory)+'.git') OR FExportOnly);
+          if UpdateWarnings.Count>0 then
+          begin
+            WritelnLog(UpdateWarnings.Text);
+          end;
+        finally
+          UpdateWarnings.Free;
+        end;
+        if SourceOK
+           then Infoln(infotext+'Download/update from GIT repository ok.',etInfo)
+           else Infoln(infotext+'Getting GIT repo failed. Trying another source, if available.',etWarning)
+      end;
 
-        //Delete existing files from install directory
-        DeleteDirectory(InstallDir,True);
+      // Handle SVN urls
+      RemoteURL:=GetValueFromKey('SVNURL',PackageSettings);
+      if (RemoteURL<>'') AND (NOT SourceOK) then
+      begin
+        Infoln(infotext+'Going to download/update from SVN repository '+RemoteURL,etInfo);
+        Infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
+        UpdateWarnings:=TStringList.Create;
+        try
+          URL:=RemoteURL;
+          SVNClient.UserName   := GetValueFromKey('UserName',PackageSettings);
+          SVNClient.Password   := GetValueFromKey('Password',PackageSettings);
+          result:=DownloadFromSVN(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
+          SourceOK:=(result) AND (DirectoryExists(IncludeTrailingPathDelimiter(FSourceDirectory)+'.svn') OR FExportOnly);
+          if UpdateWarnings.Count>0 then
+          begin
+            WritelnLog(UpdateWarnings.Text);
+          end;
+          // hack for pascalscada (if needed)
+          if ModuleName='pascalscada' then
+          begin
+            aFile:=IncludeTrailingPathDelimiter(FSourceDirectory)+'pascalscada.lrs';
+            if (NOT FileExists(aFile)) then
+            begin
+              try
+                result:=Download(FUseWget,'https://sourceforge.net/p/pascalscada/code/HEAD/tree/trunk/pascalscada.lrs?format=raw', aFile);
+              except
+              end;
+            end;
+          end;
+        finally
+          UpdateWarnings.Free;
+        end;
+        if SourceOK
+           then Infoln(infotext+'Download/update from SVN repository ok.',etInfo)
+           else Infoln(infotext+'Getting SVN repo failed. Trying another source, if available.',etWarning)
+      end;
 
-        // Extract, overwrite
-        case UpperCase(sysutils.ExtractFileExt(aFile)) of
-           '.ZIP','.TMP':
-              begin
-                //ResultCode:=ExecuteCommand(FUnzip+' -o -d '+IncludeTrailingPathDelimiter(InstallDir)+' '+aFile,FVerbose);
-                with TNormalUnzipper.Create do
+      // Handle HG URLs
+      RemoteURL:=GetValueFromKey('HGURL',PackageSettings);
+      if (RemoteURL<>'') AND (NOT SourceOK) then
+      begin
+        Infoln(infotext+'Going to download/update from HG repository '+RemoteURL,etInfo);
+        Infoln(infotext+'Please wait: this can take some time (if repo is big or has a large history).',etInfo);
+        UpdateWarnings:=TStringList.Create;
+        try
+          Url:=RemoteURL;
+          HGClient.ModuleName:=ModuleName;
+          HGClient.ExportOnly:=FExportOnly;
+          result:=DownloadFromHG(ModuleName,BeforeRevision,AfterRevision,UpdateWarnings);
+          SourceOK:=result;
+          if result=false then
+            WritelnLog(infotext+'HG error downloading from '+RemoteURL+'. Continuing regardless.',true);
+          if UpdateWarnings.Count>0 then
+          begin
+            WritelnLog(UpdateWarnings.Text);
+          end;
+        finally
+          UpdateWarnings.Free;
+        end;
+        if SourceOK
+           then Infoln(infotext+'Download/update from HG repository ok.',etInfo)
+           else Infoln(infotext+'Getting HG repo failed. Trying another source, if available.',etWarning)
+      end;
+
+      RemoteURL:=GetValueFromKey('ArchiveURL',PackageSettings);
+
+      if (RemoteURL<>'') AND (NOT SourceOK) then
+      begin
+        if (NOT DirectoryIsEmpty(ExcludeTrailingPathDelimiter(FSourceDirectory))) then
+        begin
+          Infoln(localinfotext+ModuleName+' sources are already there. Using these. Skipping download.',etWarning);
+          Infoln(localinfotext+ModuleName+' sources are already there.',etInfo);
+          Infoln(localinfotext+'Sources: '+FSourceDirectory,etInfo);
+          Infoln(localinfotext+'Build-process will continue with existing sources.',etInfo);
+          Infoln(localinfotext+'Delete directory yourself if new sources are desired.',etInfo);
+          SourceOK:=True;
+        end;
+      end;
+
+      if (RemoteURL<>'') AND (NOT SourceOK) then
+      begin
+        Infoln(infotext+'Going to download from archive '+RemoteURL,etInfo);
+        aName:=FileNameFromURL(RemoteURL);
+        if Length(aName)>0 then
+        begin
+          aName:=SysUtils.ExtractFileExt(aName);
+          if Length(aName)>0 then
+          begin
+            if aName[1]='.' then Delete(aName,1,1);
+          end;
+        end;
+        //If no extension, assume zip
+        if Length(aName)=0 then aName:='zip';
+        aFile := GetTempFileNameExt('FPCUPTMP',aName);
+        WritelnLog(infotext+'Going to download '+RemoteURL+' into '+aFile,false);
+        try
+          result:=Download(FUseWget, RemoteURL, aFile);
+        except
+          on E: Exception do
+          begin
+           result:=false;
+          end;
+        end;
+
+        if result=false then
+           WritelnLog(etError,infotext+'Error downloading from '+RemoteURL+'. Continuing regardless.',True);
+
+        if result then
+        begin
+          WritelnLog(infotext+'Download ok',True);
+
+          if (ModuleName='lamw-gradle') OR (ModuleName='mORMot-gradle') then
+          begin
+            //store info
+            aName:=infotext;
+            //try to stop gradle deamons
+            UnInstallModule(ModuleName);
+            //wait a bit after stopping daemons
+            sleep(2000);
+            //restore info
+            infotext:=aName;
+          end;
+
+          //Delete existing files from install directory
+          if DirectoryExists(FSourceDirectory) then DeleteDirectoryEx(FSourceDirectory);
+          //Sometimes, we need to do this twice ... :-(
+          if DirectoryExists(FSourceDirectory) then DeleteDirectoryEx(FSourceDirectory);
+
+          // Extract, overwrite
+          case UpperCase(SysUtils.ExtractFileExt(aFile)) of
+             '.ZIP','.TMP':
                 begin
-                  try
-                    ResultCode:=Ord(NOT DoUnZip(aFile,IncludeTrailingPathDelimiter(InstallDir),[]));
-                  finally
-                    Free;
+                  with TNormalUnzipper.Create do
+                  begin
+                    try
+                      ResultCode:=Ord(NOT DoUnZip(aFile,IncludeTrailingPathDelimiter(FSourceDirectory),[]));
+                    finally
+                      Free;
+                    end;
                   end;
                 end;
-              end;
-           '.7Z':
-              begin
-                ResultCode:=ExecuteCommand(F7zip+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
-                {$ifdef MSWINDOWS}
-                // try winrar
-                if ResultCode <> 0 then
+             '.7Z':
                 begin
-                  ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(InstallDir)+'"',FVerbose);
+                  ResultCode:=ExecuteCommand(F7zip+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+                  {$ifdef MSWINDOWS}
+                  // try winrar
+                  if ResultCode <> 0 then
+                  begin
+                    ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(FSourceDirectory)+'"',FVerbose);
+                  end;
+                  {$endif}
+                  if ResultCode <> 0 then
+                  begin
+                    ResultCode:=ExecuteCommand('7z'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+                  end;
+                  if ResultCode <> 0 then
+                  begin
+                    ResultCode:=ExecuteCommand('7za'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+                  end;
                 end;
-                {$endif}
-                if ResultCode <> 0 then
+             '.rar':
                 begin
-                  ResultCode:=ExecuteCommand('7z'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
+                  ResultCode:=ExecuteCommand(FUnrar+' x "'+aFile+'" "'+IncludeTrailingPathDelimiter(FSourceDirectory)+'"',FVerbose);
+                  {$ifdef MSWINDOWS}
+                  // try winrar
+                  if ResultCode <> 0 then
+                  begin
+                    ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(FSourceDirectory)+'"',FVerbose);
+                  end;
+                  {$endif}
                 end;
-                if ResultCode <> 0 then
-                begin
-                  ResultCode:=ExecuteCommand('7za'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
-                end;
-              end;
-           '.rar':
-              begin
-                ResultCode:=ExecuteCommand(FUnrar+' x "'+aFile+'" "'+IncludeTrailingPathDelimiter(InstallDir)+'"',FVerbose);
-                {$ifdef MSWINDOWS}
-                // try winrar
-                if ResultCode <> 0 then
-                begin
-                  ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(InstallDir)+'"',FVerbose);
-                end;
-                {$endif}
-              end;
 
-           else {.tar and all others}
-              ResultCode:=ExecuteCommand(FTar+' -xf '+aFile +' -C '+ExcludeTrailingPathDelimiter(InstallDir),FVerbose);
+             else {.tar and all others}
+                ResultCode:=ExecuteCommand(FTar+' -xf '+aFile +' -C '+ExcludeTrailingPathDelimiter(FSourceDirectory),FVerbose);
+             end;
+          if ResultCode <> 0 then
+          begin
+            result := False;
+            Infoln(infotext+'Unpack of '+aFile+' failed with resultcode: '+IntToStr(ResultCode),etWarning);
+          end;
+        end;
+        SysUtils.Deletefile(aFile); //Get rid of temp file.
+        SourceOK:=result;
+        if SourceOK then
+        begin
+          Infoln(infotext+'Download from archive ok.',etInfo);
+
+          // Check specials : sometimes, an extra path is added when unpacking, installing
+          // Move files up ... tricky, but necessary unfortunately ...
+          //if ((Pos('github.com',RemoteURL)>0) AND (Pos('/archive/',RemoteURL)>0) OR (Pos('sourceforge.net',RemoteURL)>0)) then
+          begin
+            //There should be a single directory !
+            aName:='';
+            FilesList:=FindAllDirectories(FSourceDirectory,False);
+            if FilesList.Count=1 then aName:=FilesList[0];
+            FreeAndNil(FilesList);
+            if (Length(aName)>0) AND (DirectoryExists(aName)) then
+            begin
+              Infoln(infotext+'Moving files due to extra path. Please wait.',etInfo);
+              FilesList:=FindAllFiles(aName, '', True);
+              for i:=0 to (FilesList.Count-1) do
+              begin
+                aFile:=FilesList[i];
+                aFile:=StringReplace(aFile,aName,aName+DirectorySeparator+'..',[]);
+                aFile:=SafeExpandFileName(aFile);
+                if NOT DirectoryExists(ExtractFileDir(aFile)) then ForceDirectoriesSafe(ExtractFileDir(aFile));
+                SysUtils.RenameFile(FilesList[i],aFile);
+              end;
+              if (NOT CheckDirectory(aName)) then DeleteDirectory(aName,False);
+              FreeAndNil(FilesList);
+            end;
+          end;
+        end else Infoln(infotext+'Getting archive failed. Trying another source, if available.',etInfo)
+      end;
+
+      RemoteURL:=GetValueFromKey('ArchivePATH',PackageSettings);
+      if (RemoteURL<>'') AND (NOT SourceOK) then
+      begin
+        Infoln(infotext+'Going to download from archive path '+RemoteURL,etInfo);
+        aFile := RemoteURL;
+        case UpperCase(SysUtils.ExtractFileExt(aFile)) of
+           '.ZIP':
+           begin
+             with TNormalUnzipper.Create do
+             begin
+               try
+                 ResultCode:=Ord(NOT DoUnZip(aFile,IncludeTrailingPathDelimiter(FSourceDirectory),[]));
+               finally
+                 Free;
+               end;
+             end;
            end;
+           '.7Z':
+           begin
+             ResultCode:=ExecuteCommand(F7zip+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+             {$ifdef MSWINDOWS}
+             // try winrar
+             if ResultCode <> 0 then
+             begin
+               ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(FSourceDirectory)+'"',FVerbose);
+             end;
+             {$endif}
+             if ResultCode <> 0 then
+             begin
+               ResultCode:=ExecuteCommand('7z'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+             end;
+             if ResultCode <> 0 then
+             begin
+               ResultCode:=ExecuteCommand('7za'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(FSourceDirectory)+'" '+aFile,FVerbose);
+             end;
+           end;
+           else {.tar and all others}
+              ResultCode:=ExecuteCommand(FTar+' -xf '+aFile +' -C '+ExcludeTrailingPathDelimiter(FSourceDirectory),FVerbose);
+        end;
+
         if ResultCode <> 0 then
         begin
           result := False;
-          infoln(infotext+'Unpack of '+aFile+' failed with resultcode: '+IntToStr(ResultCode),etWarning);
+          Infoln(infotext+'Unpack of '+aFile+' failed with resultcode: '+IntToStr(ResultCode),etwarning);
         end;
+
+        if result then Infoln(infotext+'Download from archive path ok.',etInfo);
+
+        // todo patch package if correct patch is available in patch directory
+
       end;
-      SysUtils.Deletefile(aFile); //Get rid of temp file.
-      SourceOK:=result;
-      if SourceOK then
-      begin
-        infoln(infotext+'Download from archive ok.',etInfo);
-
-        // Check specials : sometimes, an extra path is added when unpacking, installing
-        // Move files up ... tricky, but necessary unfortunately ...
-        if ((Pos('github.com',RemoteURL)>0) AND (Pos('/archive/',RemoteURL)>0) OR (Pos('sourceforge.net',RemoteURL)>0)) then
-        begin
-          //There should be a single directory !
-          aName:='';
-          FilesList:=FindAllDirectories(InstallDir,False);
-          if FilesList.Count=1 then aName:=FilesList[0];
-          FreeAndNil(FilesList);
-          if Length(aName)>0 then
-          begin
-            infoln(infotext+'Moving files due to extra path. Please wait.',etInfo);
-            FilesList:=FindAllFiles(aName, '', True);
-            for i:=0 to (FilesList.Count-1) do
-            begin
-              aFile:=FilesList[i];
-              aFile:=StringReplace(aFile,aName,aName+DirectorySeparator+'..',[]);
-              aFile:=SafeExpandFileName(aFile);
-              if NOT DirectoryExists(ExtractFileDir(aFile)) then CreateDir(ExtractFileDir(aFile));
-              SysUtils.RenameFile(FilesList[i],aFile);
-            end;
-            DeleteDirectory(aName,False);
-            FreeAndNil(FilesList);
-          end;
-        end;
-      end else infoln(infotext+'Getting archive failed. Trying another source, if available.',etInfo)
-    end;
-
-    RemoteURL:=GetValueFromKey('ArchivePATH',PackageSettings);
-    if (RemoteURL<>'') AND (NOT SourceOK) then
+    end
+    else
     begin
-      infoln(infotext+'Going to download from archive path '+RemoteURL,etInfo);
-      aFile := RemoteURL;
-      case UpperCase(sysutils.ExtractFileExt(aFile)) of
-         '.ZIP':
-         begin
-           with TNormalUnzipper.Create do
-           begin
-             try
-               ResultCode:=Ord(NOT DoUnZip(aFile,IncludeTrailingPathDelimiter(InstallDir),[]));
-             finally
-               Free;
-             end;
-           end;
-         end;
-         '.7Z':
-         begin
-           ResultCode:=ExecuteCommand(F7zip+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
-           {$ifdef MSWINDOWS}
-           // try winrar
-           if ResultCode <> 0 then
-           begin
-             ResultCode:=ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+aFile+' "'+IncludeTrailingPathDelimiter(InstallDir)+'"',FVerbose);
-           end;
-           {$endif}
-           if ResultCode <> 0 then
-           begin
-             ResultCode:=ExecuteCommand('7z'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
-           end;
-           if ResultCode <> 0 then
-           begin
-             ResultCode:=ExecuteCommand('7za'+GetExeExt+' x -o"'+IncludeTrailingPathDelimiter(InstallDir)+'" '+aFile,FVerbose);
-           end;
-         end;
-         else {.tar and all others}
-            ResultCode:=ExecuteCommand(FTar+' -xf '+aFile +' -C '+ExcludeTrailingPathDelimiter(InstallDir),FVerbose);
-      end;
-
-      if ResultCode <> 0 then
-      begin
-        result := False;
-        infoln(infotext+'Unpack of '+aFile+' failed with resultcode: '+IntToStr(ResultCode),etwarning);
-      end;
-
-      if result then infoln(infotext+'Download from archive path ok.',etInfo);
-
-      // todo patch package if correct patch is available in patch directory
-
+      Infoln(infotext+'No source directory defined. Skipping fetching of external sources.',etInfo);
     end;
-
   end
   else
     result:=false;
-end;
 
-function TUniversalInstaller.GetModuleRequirements(ModuleName: string;
-  var RequirementList: TStringList): boolean;
-begin
-//todo: what are we supposed to do with Requirementslist?
-  result:=InitModule;
-  if not result then exit;
+  if result then PatchModule(ModuleName);
 end;
 
 // Runs all UnInstallExecute<n> commands inside a specified module
@@ -1790,8 +2089,18 @@ var
 {$endif}
 begin
   result:=inherited;
+
+  {
+  if not DirectoryExists(FSourceDirectory) then
+  begin
+    Infoln(infotext+'No '+ModuleName+' source directory ('+FSourceDirectory+') found [yet] ... nothing to be done',etInfo);
+    exit(true);
+  end;
+  }
+
   result:=InitModule;
   if not result then exit;
+
   {$ifndef FPCONLY}
   idx:=UniModuleList.IndexOf(ModuleName);
   if idx>=0 then
@@ -1852,7 +2161,7 @@ begin
     // If Lazarus was marked for rebuild, do so:
     if FLazarusNeedsRebuild then
     begin
-      infoln(infotext+'Going to rebuild Lazarus because packages were removed.',etInfo);
+      Infoln(infotext+'Going to rebuild Lazarus because packages were removed.',etInfo);
       result:=RebuildLazarus;
     end;
   end
@@ -1861,16 +2170,337 @@ begin
   {$endif}
 end;
 
-constructor TUniversalInstaller.Create;
+{ TmORMotPXLInstaller }
+
+function TmORMotPXLInstaller.BuildModule(ModuleName: string): boolean;
+var
+  Workingdir,aFile,SDKDir,NDKDir:string;
+  s:string;
+  idx:integer;
+  sl:TStringList;
+  FilesList:TStringList;
+  FileContents:TStrings;
 begin
-  inherited Create;
+  result:=inherited;
+  result:=InitModule;
+  if not result then exit;
+
+  //Perform some extra magic for this module
+
+  idx:=UniModuleList.IndexOf(ModuleName);
+  if idx>=0 then
+  begin
+    sl:=TStringList(UniModuleList.Objects[idx]);
+
+    Workingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+    if Workingdir='' then Workingdir:=GetValueFromKey(INSTALLMAGIC,sl);
+    Workingdir:=FixPath(Workingdir);
+
+    if DirectoryExists(Workingdir) then
+    begin
+      FilesList:=TStringList.Create;
+
+      try
+
+        //Process Java JDK settings
+        s:=SafeExpandFileName(ExtractFilePath(GetJavac)+'..');
+        if DirectoryExists(s) then
+        begin
+          s:=StringReplace(s,'\','/',[rfReplaceAll]);
+          FilesList.Clear;
+          FindAllFiles(FilesList,Workingdir, 'gradle.properties', true);
+          for idx:=0 to Pred(FilesList.Count) do
+          begin
+            aFile:=FilesList[idx];
+            Infoln(infotext+'Processing file: '+aFile,etInfo);
+            FileContents:=TStringList.Create;
+            try
+              FileContents.LoadFromFile(aFile);
+              FileContents.Values['org.gradle.java.home']:=s;
+              FileContents.SaveToFile(aFile);
+            finally
+              FileContents.Free;
+            end;
+          end;
+        end;
+
+        SDKDir:=GetAndroidSDKDir;
+        NDKDir:=GetAndroidNDKDir;
+
+        FilesList.Clear;
+        FindAllFiles(FilesList,Workingdir, 'gradle-local-*.bat;gradle-local-*.sh', true);
+        for idx:=0 to Pred(FilesList.Count) do
+        begin
+          aFile:=FilesList[idx];
+          Infoln(infotext+'Processing file: '+aFile,etInfo);
+          FileContents:=TStringList.Create;
+          try
+            FileContents.LoadFromFile(aFile);
+
+            //Process Gradle settings
+            s:=ConcatPaths([Workingdir,'..','mORMot-gradle','gradle-6.3']);
+            s:=SafeExpandFileName(s);
+            if DirectoryExists(s) then
+            begin
+              FileContents.Values['set GRADLE_HOME']:=s;
+              s:='%PATH%;%GRADLE_HOME%\bin'
+            end else s:='%PATH%';
+
+            //Process SDK settings
+            if DirectoryExists(SDKDir) then
+              FileContents.Values['set PATH']:=s+';'+ConcatPaths([SDKDir,'platform-tools'])
+            else
+              FileContents.Values['set PATH']:=s;
+
+            FileContents.SaveToFile(aFile);
+          finally
+            FileContents.Free;
+          end;
+        end;
+
+        FilesList.Clear;
+        FindAllFiles(FilesList,Workingdir, 'local.properties', true);
+        for idx:=0 to Pred(FilesList.Count) do
+        begin
+          aFile:=FilesList[idx];
+          Infoln(infotext+'Processing file: '+aFile,etInfo);
+          FileContents:=TStringList.Create;
+          try
+            FileContents.LoadFromFile(aFile);
+
+            //Process SDK settings
+            if DirectoryExists(SDKDir) then
+            begin
+              s:=IncludeTrailingPathDelimiter(SDKDir);
+              {$ifdef MSWindows}
+              s:=StringReplace(s,'\','\\',[rfReplaceAll]);
+              s:=StringReplace(s,':','\:',[]);
+              {$endif}
+              FileContents.Values['sdk.dir']:=s;
+            end;
+
+            //Process NDK settings
+            if DirectoryExists(NDKDir) then
+            begin
+              s:=IncludeTrailingPathDelimiter(NDKDir);
+              {$ifdef MSWindows}
+              s:=StringReplace(s,'\','\\',[rfReplaceAll]);
+              s:=StringReplace(s,':','\:',[]);
+              {$endif}
+              FileContents.Values['ndk.dir']:=s;
+            end;
+
+            FileContents.SaveToFile(aFile);
+          finally
+            FileContents.Free;
+          end;
+        end;
+      finally
+        FilesList.Free;
+      end;
+
+    end;
+  end;
 end;
 
-destructor TUniversalInstaller.Destroy;
+function TAWGGInstaller.BuildModule(ModuleName: string): boolean;
+var
+  Workingdir,versionitis_exe:string;
+  idx:integer;
+  sl:TStringList;
 begin
-  inherited Destroy;
+  result:=inherited;
+  result:=InitModule;
+  if not result then exit;
+
+  //Perform some extra magic for this module
+
+  Workingdir:='';
+
+  idx:=UniModuleList.IndexOf(ModuleName);
+  if idx>=0 then
+  begin
+    sl:=TStringList(UniModuleList.Objects[idx]);
+    Workingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+    if Workingdir='' then Workingdir:=GetValueFromKey(INSTALLMAGIC,sl);
+    Workingdir:=FixPath(Workingdir);
+    Workingdir:=Workingdir+DirectorySeparator+'src';
+  end;
+
+  Processor.Process.Parameters.Clear;
+  Processor.Executable := IncludeTrailingPathDelimiter(LazarusInstallDir)+LAZBUILDNAME+GetExeExt;
+  Processor.Process.CurrentDirectory := ExcludeTrailingPathDelimiter(Workingdir);
+  Processor.Process.Parameters.Add('--primary-config-path='+LazarusPrimaryConfigPath);
+  Processor.Process.Parameters.Add('--recursive');
+
+  Processor.Process.Parameters.Add(Workingdir+DirectorySeparator+'versionitis.lpi');
+  Processor.Process.Parameters.Add('--build-mode=default');
+
+  Infoln(infotext+Processor.GetExeInfo,etDebug);
+  ProcessorResult:=Processor.ExecuteAndWait;
+  result := (ProcessorResult=0);
+
+  if not result then exit;
+
+  {$ifdef Windows}
+  versionitis_exe:=Workingdir+DirectorySeparator+'win-versionitis'+GetExeExt;
+  FileUtil.CopyFile(Workingdir+DirectorySeparator+'versionitis'+GetExeExt,versionitis_exe);
+  {$else}
+  versionitis_exe:=Workingdir+DirectorySeparator+'versionitis'+GetExeExt;
+  {$endif}
+
+  // Tricky: copy awgg.lpi to prevent failure of versionitis
+  ForceDirectories(Workingdir+DirectorySeparator+'src');
+  FileUtil.CopyFile(Workingdir+DirectorySeparator+'awgg.lpi',Workingdir+DirectorySeparator+'src'+DirectorySeparator+'awgg.lpi');
+  FileUtil.CopyFile(Workingdir+DirectorySeparator+'src'+DirectorySeparator+'versionitis.pas',Workingdir+DirectorySeparator+'versionitis.pas');
+
+  Processor.Process.Parameters.Clear;
+  Processor.Executable := versionitis_exe;
+  Processor.Process.CurrentDirectory := ExcludeTrailingPathDelimiter(Workingdir);
+  Processor.Process.Parameters.Add('-verbose');
+
+  Infoln(infotext+Processor.GetExeInfo,etDebug);
+  ProcessorResult:=Processor.ExecuteAndWait;
+  result := (ProcessorResult=0);
+
+  if not result then exit;
+
+  Processor.Process.Parameters.Clear;
+  Processor.Executable := IncludeTrailingPathDelimiter(LazarusInstallDir)+LAZBUILDNAME+GetExeExt;
+  Processor.Process.CurrentDirectory := ExcludeTrailingPathDelimiter(Workingdir);
+  Processor.Process.Parameters.Add('--primary-config-path='+LazarusPrimaryConfigPath);
+  Processor.Process.Parameters.Add('--recursive');
+
+  Processor.Process.Parameters.Add(Workingdir+DirectorySeparator+'awgg.lpr');
+  Processor.Process.Parameters.Add('--build-mode=default');
+
+  Infoln(infotext+Processor.GetExeInfo,etDebug);
+  ProcessorResult:=Processor.ExecuteAndWait;
+  result := (ProcessorResult=0);
 end;
 
+function TPas2jsInstaller.BuildModule(ModuleName: string): boolean;
+var
+  Workingdir,FilePath:string;
+  idx:integer;
+  sl:TStringList;
+  LazarusConfig: TUpdateLazConfig;
+begin
+  result:=inherited;
+  result:=InitModule;
+  if not result then exit;
+
+  //Perform some extra magic for this module
+
+  Workingdir:='';
+
+  idx:=UniModuleList.IndexOf(ModuleName);
+  if idx>=0 then
+  begin
+    sl:=TStringList(UniModuleList.Objects[idx]);
+    Workingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+    if Workingdir='' then Workingdir:=GetValueFromKey(INSTALLMAGIC,sl);
+    Workingdir:=FixPath(Workingdir);
+  end;
+
+  Processor.Process.Parameters.Clear;
+  Processor.Executable:=Make;
+  Processor.Process.CurrentDirectory := ExcludeTrailingPathDelimiter(Workingdir);
+  Processor.Process.Parameters.Add('PP='+FCompiler);
+  //Processor.Process.Parameters.Add('FPC='+FCompiler);
+
+  Processor.Process.Parameters.Add('clean');
+  Processor.Process.Parameters.Add('all');
+
+  Infoln(infotext+Processor.GetExeInfo,etDebug);
+  ProcessorResult:=Processor.ExecuteAndWait;
+  result := (ProcessorResult=0);
+
+  if not result then exit;
+
+  Self.GetFPCTarget(true);
+
+  LazarusConfig:=TUpdateLazConfig.Create(LazarusPrimaryConfigPath);
+  try
+    // set defaults for pas2js
+    FilePath:=ConcatPaths([WorkingDir,'bin',GetFPCTarget(true),'pas2js'+GetExeExt]);
+    LazarusConfig.SetVariable(Pas2jsConfig, 'compiler/value', FilePath);
+    FilePath:=ConcatPaths([WorkingDir,'bin',GetFPCTarget(true),'compileserver'+GetExeExt]);
+    LazarusConfig.SetVariable(Pas2jsConfig, 'webserver/value', FilePath);
+  finally
+    LazarusConfig.Free;
+  end;
+
+  FilePath:=ConcatPaths([WorkingDir,'packages','rtl','pas2js_rtl.lpk']);
+  result:=InstallPackage(FilePath,WorkingDir,True);
+  if not result then exit;
+
+  FilePath:=ConcatPaths([WorkingDir,'packages','fcl-base','fcl_base_pas2js.lpk']);
+  result:=InstallPackage(FilePath,WorkingDir,True);
+  if not result then exit;
+
+  FilePath:=ConcatPaths([WorkingDir,'packages','fcl-db','pas2js_fcldb.lpk']);
+  result:=InstallPackage(FilePath,WorkingDir,True);
+  if not result then exit;
+
+  FilePath:=ConcatPaths([WorkingDir,'packages','fpcunit','fpcunit_pas2js.lpk']);
+  result:=InstallPackage(FilePath,WorkingDir,True);
+  if not result then exit;
+
+  FilePath:=ConcatPaths([LazarusSourceDir,'components','pas2js','pas2jsdsgn.lpk']);
+  result:=InstallPackage(FilePath,WorkingDir,False);
+  if not result then exit;
+
+end;
+
+function TInternetToolsInstaller.GetModule(ModuleName: string): boolean;
+var
+  Workingdir,FLREDir:string;
+  aSourceFile,aTargetFile:string;
+  idx:integer;
+  sl:TStringList;
+begin
+  result:=inherited;
+  result:=InitModule;
+  if not result then exit;
+
+  //Perform some extra magic for this module
+  //Copy some files from FLRE
+
+  Workingdir:='';
+  FLREDir:='';
+
+  idx:=UniModuleList.IndexOf(ModuleName);
+  if idx>=0 then
+  begin
+    sl:=TStringList(UniModuleList.Objects[idx]);
+    Workingdir:=GetValueFromKey(LOCATIONMAGIC,sl);
+    if Workingdir='' then Workingdir:=GetValueFromKey(INSTALLMAGIC,sl);
+    Workingdir:=FixPath(Workingdir);
+  end;
+
+  idx:=UniModuleList.IndexOf('flre');
+  if idx>=0 then
+  begin
+    sl:=TStringList(UniModuleList.Objects[idx]);
+    FLREDir:=GetValueFromKey(LOCATIONMAGIC,sl);
+    if FLREDir='' then FLREDir:=GetValueFromKey(INSTALLMAGIC,sl);
+    FLREDir:=FixPath(FLREDir);
+  end;
+
+  if DirectoryExists(Workingdir) AND DirectoryExists(FLREDir) then
+  begin
+    aSourceFile:=ConcatPaths([FLREDir,'src'])+DirectorySeparator+'FLRE.pas';
+    aTargetFile:=ConcatPaths([Workingdir,'data'])+DirectorySeparator+'FLRE.pas';
+    if FileExists(aSourceFile) then
+      FileUtil.CopyFile(aSourceFile,aTargetFile,[]);
+
+    aSourceFile:=ConcatPaths([FLREDir,'src'])+DirectorySeparator+'PUCU.pas';
+    aTargetFile:=ConcatPaths([Workingdir,'data'])+DirectorySeparator+'PUCU.pas';
+    if FileExists(aSourceFile) then
+      FileUtil.CopyFile(aSourceFile,aTargetFile,[]);
+  end;
+end;
 
 procedure ClearUniModuleList;
 var
@@ -1884,7 +2514,6 @@ function GetKeyword(aDictionary,aAlias: string): string;
 var
   ini:TMemIniFile;
   sl:TStringList;
-  e:Exception;
   i:integer;
 begin
   result:='';
@@ -1940,10 +2569,9 @@ begin
       begin
         if (result='') then
         begin
-          infoln('InstallerUniversal (GetAlias): no source alias found: using fpcup default',etInfo);
-          if aDictionary='fpcURL' then result:=FPCSVNURL+'/fpc/tags/release_'+StringReplace(DEFAULTFPCVERSION,'.','_',[rfReplaceAll]);
+          if aDictionary='fpcURL' then result:=FPCBASESVNURL+'/svn/fpc/tags/release_'+StringReplace(DEFAULTFPCVERSION,'.','_',[rfReplaceAll]);
           {$ifndef FPCONLY}
-          if aDictionary='lazURL' then result:=FPCSVNURL+'/lazarus/tags/lazarus_'+StringReplace(DEFAULTLAZARUSVERSION,'.','_',[rfReplaceAll]);
+          if aDictionary='lazURL' then result:=FPCBASESVNURL+'/svn/lazarus/tags/lazarus_'+StringReplace(DEFAULTLAZARUSVERSION,'.','_',[rfReplaceAll]);
           {$endif}
         end;
 
@@ -1957,6 +2585,31 @@ begin
   finally
     ini.Free;
     sl.free;
+  end;
+end;
+
+function SetAlias(aDictionary,aKeyWord,aValue: string):boolean;
+var
+  ini:TMemIniFile;
+  s:string;
+begin
+  result:=false;
+  ini:=TMemIniFile.Create(CurrentConfigFile);
+  {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
+  ini.Options:=ini.Options-[ifoCaseSensitive];
+  {$ELSE}
+  ini.CaseSensitive:=false;
+  {$ENDIF}
+  try
+    s:=ini.ReadString('ALIAS'+aDictionary,aKeyWord,'');
+    if (length(s)=0) then
+    begin
+      ini.WriteString('ALIAS'+aDictionary,aKeyWord,aValue);
+      ini.UpdateFile;
+      result:=true;
+    end;
+  finally
+    ini.Free;
   end;
 end;
 
@@ -1998,36 +2651,60 @@ var
     end;
   end;
 
-  function CreateModuleSequence(aModuleName:string):string;
+  function CreateModuleSequence(aModuleName:string;IsHidden:boolean=false):string;
   var
-    ModuleName,RequiredModules:string;
+    ModuleName,Declaration,RequiredModules:string;
+    RequiredModulesList:TStringList;
+    li:integer;
   begin
     result:='';
     ModuleName:=ini.ReadString(aModuleName,INIKEYWORD_NAME,'');
     if ModuleName<>'' then
-      begin
-      RequiredModules:=ini.ReadString(aModuleName,Trim(_REQUIRES),'');
-      if RequiredModules<>'' then
-      begin
-        RequiredModules:=_REQUIRES + RequiredModules + _SEP;
-        RequiredModules:=StringReplace(RequiredModules, ',', _SEP+_REQUIRES, [rfReplaceAll,rfIgnoreCase]);
+    begin
+      if IsHidden then Declaration:=_DECLAREHIDDEN else Declaration:=_DECLARE;
+
+      RequiredModules:='';
+      RequiredModulesList:=TStringList.Create;
+      try
+        {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION >= 30200)}
+        RequiredModulesList.AddCommaText(ini.ReadString(aModuleName,Trim(_REQUIRES),''));
+        {$ELSE}
+        RequiredModulesList.AddText(ini.ReadString(aModuleName,Trim(_REQUIRES),''));
+        {$ENDIF}
+        if (RequiredModulesList.Count>0) then
+        begin
+          for li:=0 to Pred(RequiredModulesList.Count) do
+          begin
+            RequiredModules:=RequiredModules+_REQUIRES+RequiredModulesList.Strings[li]+_SEP;
+          end;
+        end;
+      finally
+        RequiredModulesList.Free;
       end;
 
       result:=
-          _DECLARE+ ModuleName + _SEP +
+          Declaration+ ModuleName + _SEP +
           RequiredModules +
           _CLEANMODULE + ModuleName +_SEP +
           _GETMODULE + ModuleName +_SEP +
-          _BUILDMODULE + ModuleName +_SEP +
           _CONFIGMODULE + ModuleName +_SEP +
+          _BUILDMODULE + ModuleName +_SEP +
           _END +
-          _DECLARE + ModuleName + _CLEAN + _SEP +
+
+          Declaration + ModuleName + _CLEAN + _SEP +
           _CLEANMODULE + ModuleName +_SEP +
           _END +
-          _DECLARE + ModuleName + _UNINSTALL + _SEP +
+
+          Declaration + ModuleName + _BUILD + _ONLY + _SEP +
+          _CLEANMODULE + ModuleName +_SEP +
+          _CONFIGMODULE + ModuleName +_SEP +
+          _BUILDMODULE + ModuleName +_SEP +
+          _END+
+
+          Declaration + ModuleName + _UNINSTALL + _SEP +
           _UNINSTALLMODULE + ModuleName +_SEP +
           _END;
-      end;
+    end;
   end;
 
 begin
@@ -2052,6 +2729,10 @@ begin
     for i:=0 to maxmodules do
       if LoadModule('UserModule'+IntToStr(i))then
         result:=result+CreateModuleSequence('UserModule'+IntToStr(i));
+    for i:=0 to maxmodules do
+      if LoadModule('HiddenModule'+IntToStr(i))then
+        result:=result+CreateModuleSequence('HiddenModule'+IntToStr(i),true);
+
     // the overrides in the [general] section
     for i:=0 to UniModuleList.Count-1 do
       begin
@@ -2117,7 +2798,7 @@ var
       s:=sl[i];
       if (copy(UpperCase(s),1, length(Key))=Key) and ((s[length(Key)+1]='=') or (s[length(Key)+1]=' ')) then
         begin
-        if pos('=',s)>0 then
+        if Pos('=',s)>0 then
           s:=trim(copy(s,pos('=',s)+1,length(s)));
         break;
         end;
@@ -2190,10 +2871,10 @@ begin
            if (Pos('windows',os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-windows',os)=0),NegativeList) else
            begin
              {$ifdef win32}
-             if (Pos('win32',os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-win32',os)=0),NegativeList);
+             if (Pos(GetOS(TOS.win32),os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-win32',os)=0),NegativeList);
              {$endif}
              {$ifdef win64}
-             if (Pos('win64',os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-win64',os)=0),NegativeList);
+             if (Pos(GetOS(TOS.win64),os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-win64',os)=0),NegativeList);
              {$endif}
            end;
          end;
@@ -2216,7 +2897,6 @@ begin
          {$ifdef FreeBSD}
          if (Pos('freebsd',os)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-freebsd',os)=0),NegativeList);
          {$endif}
-
       end;
 
       cpu:=GetValueSimple('CPU_OK',sl);
@@ -2235,8 +2915,6 @@ begin
          // if we have a negative define list, then default to true until an negative setting is encountered
          // if we have a positive define list, then default to false until a positive setting is encountered
          AddModule:=NegativeList;
-
-
 
          {$ifdef CPU32}
          if (Pos('cpu32',cpu)>0) then AddModule:=AND_OR_Values(AddModule,(Pos('-cpu32',cpu)=0),NegativeList);
@@ -2272,8 +2950,6 @@ begin
   end;
 end;
 
-
-
 function GetModuleEnabledList(var ModuleList: TStringList): boolean;
 var i:integer;
 begin
@@ -2284,9 +2960,6 @@ begin
 end;
 
 function SetConfigFile(aConfigFile: string):boolean;
-var
-  ConfigFile: Text;
-  CurrentConfigFileName:string;
 begin
   result:=true;
   CurrentConfigFile:=aConfigFile;
@@ -2294,59 +2967,6 @@ begin
   if (CurrentConfigFile=SafeGetApplicationPath+CONFIGFILENAME) then
      result:=SaveInisFromResource(SafeGetApplicationPath+CONFIGFILENAME,'fpcup_ini');
 end;
-
-function GetCPUOSCombo(aCPU,aOS:string):TCPUOS;
-var
-  xCPU:TCPU;
-  xOS:TOS;
-  aLocalCPU,aLocalOS:string;
-begin
-  aLocalCPU:=aCPU;
-
-  if length(aLocalCPU)>0 then
-  begin
-    if aLocalCPU='ppc' then aLocalCPU:='powerpc';
-    if aLocalCPU='ppc64' then aLocalCPU:='powerpc64';
-
-    xCPU:=TCPU(GetEnumValue(TypeInfo(TCPU),aLocalCPU));
-    if Ord(xCPU) < 0 then
-      raise Exception.CreateFmt('Invalid CPU name "%s" for GetCPUOSCombo.', [aLocalCPU]);
-    result.CPU:=xCPU;
-  end;
-
-  aLocalOS:=aOS;
-  if length(aLocalOS)>0 then
-  begin
-    if aLocalOS='win32' then aLocalOS:='windows';
-    if aLocalOS='win64' then aLocalOS:='windows';
-    if aLocalOS='i-sim' then aLocalOS:='iphonesim';
-    if aLocalOS='i-simulator' then aLocalOS:='iphonesim';
-    if aLocalOS='iphone-simulator' then aLocalOS:='iphonesim';
-    if aLocalOS='iphonesimulator' then aLocalOS:='iphonesim';
-
-    xOS:=TOS(GetEnumValue(TypeInfo(TOS),aLocalOS));
-    if Ord(xOS) < 0 then
-      raise Exception.CreateFmt('Invalid OS name "%s" for GetCPUOSCombo.', [aLocalOS]);
-    result.OS:=xOS;
-  end;
-
-end;
-
-function GetARMArch(aARMArch:string):TARMARCH;
-begin
-  if Length(aARMArch)=0 then
-    result:=TARMARCH.default
-  else
-    result:=TARMARCH(GetEnumValue(TypeInfo(TARMARCH),aARMArch));
-  if Ord(result) < 0 then
-    raise Exception.CreateFmt('Invalid ARM Arch name "%s" for GetARMArch.', [aARMArch]);
-end;
-
-function GetARMArchFPCDefine(aARMArch:TARMARCH):string;
-begin
-  result:=ARMArchFPCStr[aARMArch];
-end;
-
 
 initialization
   IniGeneralSection:=TStringList.create;

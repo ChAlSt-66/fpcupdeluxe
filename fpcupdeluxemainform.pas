@@ -2,15 +2,16 @@ unit fpcupdeluxemainform;
 
 {$mode objfpc}{$H+}
 
-
 interface
 
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Types, Buttons, Menus, ComCtrls, SynEdit, SynEditPopup,
-  SynEditMiscClasses, SynGutterCodeFolding, installerManager
+  ExtCtrls, Types, Buttons, Menus, ComCtrls,
+  SynEdit, SynEditMiscClasses, SynEditPopup,
+  installerManager
   {$ifdef usealternateui},alternateui{$endif}
-  ,LCLVersion
+  ,LMessages
+  ,LCLVersion, ActnList, StdActns, IniPropStorage
   {$ifdef RemoteLog}
   ,mormotdatamodelclient
   {$endif}
@@ -20,37 +21,71 @@ uses
 {$define EnableLanguages}
 {$endif}
 
+const
+  WM_THREADINFO = LM_USER + 2010;
+
 type
+  TSynEditHelper = class helper for TCustomSynEdit
+    procedure SetFiltered(line: string); inline;
+  end;
+
 
   { TForm1 }
 
   TForm1 = class(TForm)
-    AutoCrossUpdate: TButton;
+    ActionList1: TActionList;
+    ButtonSubarchSelect: TButton;
     BitBtnFPCandLazarus: TBitBtn;
     BitBtnFPCOnly: TBitBtn;
+    BitBtnFPCOnlyTag: TBitBtn;
     BitBtnHalt: TBitBtn;
     BitBtnLazarusOnly: TBitBtn;
+    BitBtnLazarusOnlyTag: TBitBtn;
+    btnSendLog: TButton;
+    btnUpdateLazarusMakefiles: TButton;
     btnInstallModule: TButton;
     btnSetupPlus: TButton;
     btnClearLog: TButton;
     btnUninstallModule: TButton;
     btnGetOpenSSL: TButton;
+    ButtonAutoCrossUpdate: TButton;
+    ChkMakefileFPC: TButton;
     ButtonInstallCrossCompiler: TButton;
     ButtonRemoveCrossCompiler: TButton;
     CheckAutoClear: TCheckBox;
+    CreateStartup: TButton;
+    ChkMakefileLaz: TButton;
+    actFileExit: TFileExit;
+    actFileSave: TFileSaveAs;
     FPCVersionLabel: TLabel;
+    FPCTagLabel: TLabel;
+    IniPropStorageApp: TIniPropStorage;
     LazarusVersionLabel: TLabel;
+    LazarusTagLabel: TLabel;
     ListBoxFPCTarget: TListBox;
+    ListBoxFPCTargetTag: TListBox;
     ListBoxLazarusTarget: TListBox;
+    ListBoxLazarusTargetTag: TListBox;
     listModules: TListBox;
     MainMenu1: TMainMenu;
     Memo1: TMemo;
+    MemoAddTag: TMemo;
     memoSummary: TMemo;
     MenuItem1: TMenuItem;
     EmbeddedBtn: TBitBtn;
     MenuItem2: TMenuItem;
     MEnglishlanguage: TMenuItem;
     MChineseCNlanguage: TMenuItem;
+    MenuItem3: TMenuItem;
+    MenuItem4: TMenuItem;
+    MenuFile: TMenuItem;
+    MenuItem5: TMenuItem;
+    MenuItem6: TMenuItem;
+    MFPCBugs: TMenuItem;
+    MLazarusBugs: TMenuItem;
+    MIssuesGitHub: TMenuItem;
+    MIssuesForum: TMenuItem;
+    mORMot2Btn: TBitBtn;
     OPMBtn: TBitBtn;
     PageControl1: TPageControl;
     radgrpCPU: TRadioGroup;
@@ -60,6 +95,7 @@ type
     CrossSheet: TTabSheet;
     ModuleSheet: TTabSheet;
     ExtraSheet: TTabSheet;
+    TagSheet: TTabSheet;
     TrunkBtn: TBitBtn;
     FixesBtn: TBitBtn;
     StableBtn: TBitBtn;
@@ -72,41 +108,50 @@ type
     RealLazURL: TEdit;
     SelectDirectoryDialog1: TSelectDirectoryDialog;
     CommandOutputScreen: TSynEdit;
-    procedure BitBtnHaltClick(Sender: TObject);
-    procedure btnGetOpenSSLClick(Sender: TObject);
-    procedure Edit1KeyUp(Sender: TObject; {%H-}var Key: Word; {%H-}Shift: TShiftState);
-    procedure FPCVersionLabelClick(Sender: TObject);
-    procedure LazarusOnlyClick(Sender: TObject);
-    procedure BitBtnFPCandLazarusClick(Sender: TObject);
+    procedure actFileSaveAccept({%H-}Sender: TObject);
+    procedure btnUpdateLazarusMakefilesClick({%H-}Sender: TObject);
+    procedure ButtonSubarchSelectClick(Sender: TObject);
+    procedure IniPropStorageAppRestoringProperties(Sender: TObject);
+    procedure IniPropStorageAppSavingProperties(Sender: TObject);
+    procedure radgrpTargetChanged({%H-}Sender: TObject);
+    procedure TagSelectionChange(Sender: TObject;{%H-}User: boolean);
+    procedure OnlyTagClick(Sender: TObject);
+    procedure InstallClick(Sender: TObject);
+    procedure BitBtnHaltClick({%H-}Sender: TObject);
+    procedure btnGetOpenSSLClick({%H-}Sender: TObject);
+    procedure Button1Click({%H-}Sender: TObject);
+    procedure ChkMakefileFPCClick(Sender: TObject);
+    procedure Edit1KeyUp({%H-}Sender: TObject; var {%H-}Key: Word; {%H-}Shift: TShiftState);
+    procedure FPCVersionLabelClick({%H-}Sender: TObject);
     procedure btnInstallModuleClick(Sender: TObject);
-    procedure btnInstallDirSelectClick(Sender: TObject);
-    procedure ButtonInstallCrossCompilerClick(Sender: TObject);
-    procedure FPCOnlyClick(Sender: TObject);
-    procedure btnSetupPlusClick(Sender: TObject);
-    procedure btnClearLogClick(Sender: TObject);
+    procedure btnInstallDirSelectClick({%H-}Sender: TObject);
+    procedure btnSetupPlusClick({%H-}Sender: TObject);
+    procedure btnLogClick({%H-}Sender: TObject);
+    function  ButtonProcessCrossCompiler(Sender: TObject):boolean;
     procedure ButtonAutoUpdateCrossCompiler(Sender: TObject);
-    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
-    procedure FormCreate(Sender: TObject);
-    procedure FormDestroy(Sender: TObject);
-    procedure FormResize(Sender: TObject);
-    procedure LazarusVersionLabelClick(Sender: TObject);
+    procedure FormClose({%H-}Sender: TObject; var CloseAction: TCloseAction);
+    procedure FormCreate({%H-}Sender: TObject);
+    procedure FormDestroy({%H-}Sender: TObject);
+    procedure LazarusVersionLabelClick({%H-}Sender: TObject);
     procedure listModulesSelectionChange(Sender: TObject; User: boolean);
     procedure listModulesShowHint(Sender: TObject; HintInfo: PHintInfo);
-    procedure MChineseCNlanguageClick(Sender: TObject);
-    procedure MEnglishlanguageClick(Sender: TObject);
+    procedure MChineseCNlanguageClick({%H-}Sender: TObject);
+    procedure MEnglishlanguageClick({%H-}Sender: TObject);
+    procedure MFPCBugsClick({%H-}Sender: TObject);
+    procedure MIssuesForumClick({%H-}Sender: TObject);
+    procedure MIssuesGitHubClick({%H-}Sender: TObject);
+    procedure MLazarusBugsClick({%H-}Sender: TObject);
+    procedure PageControl1Change(Sender: TObject);
     procedure RealURLChange(Sender: TObject);
     procedure RealURLDblClick(Sender: TObject);
-    procedure CommandOutputScreenChange(Sender: TObject);
-    procedure CommandOutputScreenSpecialLineMarkup(Sender: TObject; Line: integer;
+    procedure CommandOutputScreenChange({%H-}Sender: TObject);
+    procedure CommandOutputScreenSpecialLineMarkup({%H-}Sender: TObject; Line: integer;
       var Special: boolean; Markup: TSynSelectedColor);
     procedure TargetSelectionChange(Sender: TObject; User: boolean);
-    procedure MenuItem1Click(Sender: TObject);
-    procedure radgrpCPUClick(Sender: TObject);
-    procedure radgrpOSClick(Sender: TObject);
-    procedure CommandOutputScreenMouseWheel(Sender: TObject; Shift: TShiftState;
+    procedure MenuItem1Click({%H-}Sender: TObject);
+    procedure CommandOutputScreenMouseWheel({%H-}Sender: TObject; Shift: TShiftState;
       WheelDelta: Integer; {%H-}MousePos: TPoint; var {%H-}Handled: Boolean);
     procedure QuickBtnClick(Sender: TObject);
-
     {$ifdef usealternateui}
     procedure alternateuibutClick(Sender: TObject);
     procedure alternateuibutEnter(Sender: TObject);
@@ -116,7 +161,7 @@ type
     { private declarations }
     MessageTrigger:boolean;
     FPCupManager:TFPCupManager;
-    oldoutput: TextFile;
+    //oldoutput: TextFile;
     sInstallDir:string;
     sStatus:string;
     {$ifdef EnableLanguages}
@@ -131,15 +176,18 @@ type
     sConsentWarning:boolean;
     aDataClient:TDataClient;
     {$endif}
-    procedure InitFpcupdeluxe({%H-}Data: PtrInt);
-    procedure CheckForUpdates({%H-}Data: PtrInt);
-    function  InstallCrossCompiler(Sender: TObject):boolean;
-    function  RemoveCrossCompiler(Sender: TObject):boolean;
+    procedure HandleInfo(var Msg: TLMessage); message WM_THREADINFO;
+    procedure InitFpcupdeluxe({%H-}Data: PtrInt=0);
+    {$ifdef RemoteLog}
+    procedure InitConsent({%H-}Data: PtrInt=0);
+    {$endif}
+    procedure InitShortCuts;
+    procedure CheckForUpdates({%H-}Data: PtrInt=0);
     function  AutoUpdateCrossCompiler(Sender: TObject):boolean;
     procedure SetFPCTarget(aFPCTarget:string);
     procedure SetLazarusTarget(aLazarusTarget:string);
     procedure DisEnable({%H-}Sender: TObject;value:boolean);
-    procedure Edit1Change(Sender: TObject);
+    procedure Edit1Change({%H-}Sender: TObject);
     procedure PrepareRun;
     function  RealRun:boolean;
     function  GetFPCUPSettings(IniDirectory:string):boolean;
@@ -147,17 +195,21 @@ type
     procedure AddMessage(const aMessage:string; const UpdateStatus:boolean=false);
     procedure SetTarget(aControl:TControl;const aTarget:string='');
     procedure InitFPCupManager;
+    function  GetCmdFontSize:integer;
+    procedure SetCmdFontSize(aValue:integer);
     {$ifndef usealternateui}
     property  FPCTarget:string read FFPCTarget write SetFPCTarget;
     property  LazarusTarget:string read FLazarusTarget write SetLazarusTarget;
     {$endif}
-
   public
     { public declarations }
     {$ifdef usealternateui}
     property FPCTarget:string read FFPCTarget write SetFPCTarget;
     property LazarusTarget:string read FLazarusTarget write SetLazarusTarget;
     {$endif}
+
+  published
+    property CmdFontSize: integer read GetCmdFontSize write SetCmdFontSize;
   end;
 
 resourcestring
@@ -170,8 +222,6 @@ resourcestring
   upBuildAllCrossCompilersFound = 'Found crosscompiler for ';
   upBuildAllCrossCompilersUpdate = 'Going to update cross-compiler.';
 
-
-
 var
   Form1: TForm1;
 
@@ -180,31 +230,59 @@ implementation
 {$R *.lfm}
 
 uses
-  IniFiles,
-  strutils,
-  LCLType, // for MessageBox
-  lclintf, // for OpenURL
   InterfaceBase, // for WidgetSet
+  LCLType, // for MessageBox
+  LCLIntf, // for OpenURL
+  IniFiles,
+  StrUtils,
   {$ifdef EnableLanguages}
   Translations,
   LCLTranslator,
   LazUTF8,
   {$endif}
   {$ifdef UNIX}
-  baseunix,
+  BaseUnix,
   {$endif UNIX}
   AboutFrm,
   extrasettings,
+  subarch,
   modulesettings,
   //checkoptions,
   installerCore,
   installerUniversal,
   m_crossinstaller, // for checking of availability of fpc[laz]up[deluxe] cross-compilers
   fpcuputil,
-  processutils,
-  synedittext;
+  process,
+  processutils;
 
 //{$I message.inc}
+
+
+procedure TSynEditHelper.SetFiltered(line: string);
+begin
+  // skip stray empty lines
+  //if (Length(line)=0) then exit;
+
+  {$ifdef Darwin}
+  // suppress all setfocus errors on Darwin, always
+  if AnsiContainsText(line,'.setfocus') then exit;
+  {$endif}
+
+  // suppress all SynEdit PaintLock errors, always
+  if AnsiContainsText(line,'PaintLock') then exit;
+
+  {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
+  Self.Append(line);
+  {$ELSE}
+  Self.Lines.Append(line);
+  {$ENDIF}
+  Self.CaretX:=0;
+  Self.CaretY:=Self.Lines.Count;
+  // the below is needed:
+  // onchange is no longer called, when appending a line ... bug or feature ?!!
+  Self.OnChange(Self);
+  //Application.ProcessMessages;
+end;
 
 { TForm1 }
 
@@ -259,6 +337,8 @@ var
 begin
   MessageTrigger:=false;
 
+  IniPropStorageApp.IniFileName:=IncludeTrailingPathDelimiter(SafeGetApplicationPath)+installerUniversal.DELUXEFILENAME;
+
   {$ifdef EnableLanguages}
   sLanguage:='en';
   {$endif}
@@ -281,29 +361,31 @@ begin
   {$endif}
 
   {$ifndef MSWINDOWS}
-  ExtraSheet.TabVisible:=false;
+  btnGetOpenSSL.Visible:=false;
   {$endif}
 
-  {$IF defined(CPUAARCH64) OR defined(CPUARM) OR (DEFINED(CPUPOWERPC64) AND DEFINED(FPC_ABI_ELFV2)) OR defined(Haiku)}
+  {$IF defined(Haiku) OR defined(AROS) OR defined(Morphos) OR (defined(CPUPOWERPC64) AND defined(FPC_ABI_ELFV2)) OR (defined(CPUPOWERPC) AND defined(Darwin)) OR (defined(CPUPOWERPC64) AND defined(Darwin))}
   // disable some features
   OldBtn.Visible:=False;
   {DinoBtn.Visible:=False;}
   CrossSheet.TabVisible:=false;
   {$endif}
-  {$IF defined(CPUAARCH64) OR (DEFINED(CPUPOWERPC64) AND DEFINED(FPC_ABI_ELFV2))}
+  {$IF defined(CPUAARCH64) OR (defined(CPUPOWERPC64) AND defined(FPC_ABI_ELFV2))}
   // disable some features
-  FixesBtn.Visible:=False;
-  StableBtn.Visible:=False;
+  OldBtn.Visible:=False;
   {$endif}
 
   {$ifdef Darwin}
-  radgrpOS.Items.Strings[radgrpOS.Items.IndexOf('wince')]:='i-sim';
+  radgrpOS.Items.Strings[radgrpOS.Items.IndexOf(GetOS(TOS.wince))]:='i-sim';
   {$endif Darwin}
 
+
+  (*
   oldoutput := System.Output;
   AssignSynEdit(System.Output, CommandOutputScreen);
   Reset(System.Input);
   Rewrite(System.Output);
+  *)
 
   {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
   aTarget:=GetLCLWidgetTypeName;
@@ -329,17 +411,32 @@ begin
 
   sStatus:='Sitting and waiting';
 
+  InitShortCuts;
+
   {$IFDEF MSWINDOWS}
   sInstallDir:='C:\fpcupdeluxe';
   {$ELSE}
-  sInstallDir:='~/fpcupdeluxe';
+  sInstallDir:=ExpandFileName('~/fpcupdeluxe');
   btnGetOpenSSL.Visible:=False;
   {$ENDIF}
 
+  {$ifdef Haiku}
+  MenuItem3.Visible:=False;
+  {$endif}
+
+  //Prevent overwriting an existing install when starting with a new fpcupdeluxe install
+  If DirectoryExists(sInstallDir) then
+    sInstallDir:=IncludeTrailingPathDelimiter(SafeGetApplicationPath)+'fpcupdeluxe';
+
   {$ifdef DARWIN}
   // we could have started from with an .app , so goto the basedir ... not sure if realy needed, but to be sure.
-  SetCurrentDir(ExcludeTrailingPathDelimiter(SafeGetApplicationPath));
+  AddMessage('Setting base directory to: '+ExcludeTrailingPathDelimiter(SafeGetApplicationPath));
+  if (NOT SetCurrentDir(ExcludeTrailingPathDelimiter(SafeGetApplicationPath))) then
+    AddMessage('Setting base directory failure !!')
+  else
+    AddMessage('Current base directory : '+GetCurrentDir);
   {$endif}
+
   // get last used install directory, proxy and visual settings
   with TIniFile.Create(SafeGetApplicationPath+installerUniversal.DELUXEFILENAME) do
   try
@@ -351,19 +448,6 @@ begin
     sConsentWarning:=ReadBool('General','ConsentWarning',true);
     {$endif}
     CheckAutoClear.Checked:=ReadBool('General','AutoClear',True);
-    CommandOutputScreen.Font.Size := ReadInteger('General','CommandFontSize',CommandOutputScreen.Font.Size);
-    if ReadBool('General','Maximized',False) then
-    begin
-      Self.WindowState:=wsMaximized;
-    end
-    else
-    begin
-      Self.WindowState:=wsNormal;
-      Self.Top := ReadInteger('General','Top',Self.Top);
-      Self.Left := ReadInteger('General','Left',Self.Left);
-      Self.Width := ReadInteger('General','Width',Self.Width);
-      Self.Height := ReadInteger('General','Height',Self.Height);
-    end;
   finally
     Free;
   end;
@@ -404,7 +488,11 @@ begin
     // must be done here, to enable local storage/access of some setttings !!
     Form2:=TForm2.Create(Form1);
     Form3:=TForm3.Create(Form1);
-    Application.QueueAsyncCall(@InitFpcupdeluxe,0);
+    SubarchForm:=TSubarchForm.Create(Form1);
+    InitFpcupdeluxe;
+    {$ifdef RemoteLog}
+    Application.QueueAsyncCall(@InitConsent,0);
+    {$endif}
   end
   else
   begin
@@ -422,6 +510,9 @@ procedure TForm1.FormDestroy(Sender: TObject);
 var
   i:integer;
 begin
+  //if Assigned(Form3) then Form3.Destroy;
+  //if Assigned(Form2) then Form2.Destroy;
+
   for i:=(listModules.Count-1) downto 0 do
   begin
     if Assigned(listModules.Items.Objects[i]) then
@@ -431,13 +522,20 @@ begin
   end;
 
   {$ifdef RemoteLog}
-  FreeAndNil(aDataClient);
+  if Assigned(aDataClient) then aDataClient.Destroy;
   {$endif}
+
   (* using CloseFile will ensure that all pending output is flushed *)
-  CloseFile(System.Output);
-  System.Output := oldoutput;
+  (*
+  //if (TTextRec(oldoutput).Handle=UnusedHandle) then
+  begin
+    CloseFile(System.Output);
+    System.Output := oldoutput;
+  end;
+  *)
 end;
 
+{
 procedure TForm1.FormResize(Sender: TObject);
 var
   w:integer;
@@ -446,9 +544,19 @@ begin
   RealFPCURL.Width:=(w-4);
   RealLazURL.Width:=RealFPCURL.Width;
   RealLazURL.Left:=RealFPCURL.Left+(w+4);
-  {$ifdef usealternateui}
-  alternateui_resize;
-  {$endif}
+end;
+}
+
+procedure TForm1.InitShortCuts;
+begin
+{$IFDEF LINUX}
+  actFileExit.ShortCut := KeyToShortCut(VK_Q, [ssCtrl]);
+  actFileSave.ShortCut := KeyToShortCut(VK_S, [ssCtrl]);
+{$ENDIF}
+{$IFDEF WINDOWS}
+  actFileExit.ShortCut := KeyToShortCut(VK_X, [ssAlt]);
+  actFileSave.ShortCut := KeyToShortCut(VK_S, [ssAlt]);
+{$ENDIF}
 end;
 
 procedure TForm1.LazarusVersionLabelClick(Sender: TObject);
@@ -517,6 +625,26 @@ begin
   {$endif}
 end;
 
+procedure TForm1.MFPCBugsClick(Sender: TObject);
+begin
+  OpenURL('https://bugs.freepascal.org/my_view_page.php');
+end;
+
+procedure TForm1.MIssuesForumClick(Sender: TObject);
+begin
+  OpenURL('https://forum.lazarus.freepascal.org/index.php/topic,34645.0.html');
+end;
+
+procedure TForm1.MIssuesGitHubClick(Sender: TObject);
+begin
+  OpenURL('https://github.com/LongDirtyAnimAlf/fpcupdeluxe/issues');
+end;
+
+procedure TForm1.MLazarusBugsClick(Sender: TObject);
+begin
+  OpenURL('https://bugs.freepascal.org/view_all_bug_page.php?project_id=1');
+end;
+
 procedure TForm1.RealURLChange(Sender: TObject);
 begin
   SetTarget(TEdit(Sender));
@@ -540,25 +668,41 @@ var
   FPCCfg:string;
   BinPath:string;
   ConfigText: TStringList;
-  aCPU, aOS, aArch: string;
+  aCPU, aOS: string;
+  aSubArch: string;
+  //aArch: string;
   // tricky: to be changed; todo
   aRadiogroup_CPU,aRadiogroup_OS: string;
   CheckAutoClearStore:boolean;
   success:boolean;
   SnipBegin,i:integer;
-  s:string;
+  s,aResultMessage:string;
 begin
   aOS := GetTargetOS;
   aCPU := GetTargetCPU;
-  BinPath:=IncludeTrailingPathDelimiter(sInstallDir)+'fpc'+DirectorySeparator+'bin'+DirectorySeparator+aCPU + '-' + aOS;
-  FPCCfg := IncludeTrailingPathDelimiter(BinPath) + 'fpc.cfg';
+  aSubArch :='';
+
+  //BinPath:=ConcatPaths([FPCupManager.FPCInstallDirectory,'bin',aCPU+'-'+aOS]);
+  BinPath:=ConcatPaths([sInstallDir,'fpc','bin',aCPU+'-'+aOS]);
+
+  FPCCfg := IncludeTrailingPathDelimiter(BinPath) + FPCCONFIGFILENAME;
 
   result:=false;
 
   if NOT FileExists(FPCCfg) then
   begin
-    if (Sender<>nil) then AddMessage('FPC configfile [fpc.cfg] not found in ' + BinPath);
+    if (Sender<>nil) then AddMessage('FPC configfile ['+FPCCONFIGFILENAME+'] not found in ' + BinPath);
     exit;
+  end;
+
+  if (Sender<>nil) then
+  begin
+    s:='Going to update all crosscompilers !' + sLineBreak +
+       'Do you want to continue ?';
+    if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
+    begin
+      exit;
+    end;
   end;
 
   if (Sender<>nil) then
@@ -580,6 +724,8 @@ begin
 
   success:=true;
 
+  aResultMessage:='No cross-compilers found. Nothing to do !';
+
   ConfigText:=TStringList.Create;
   try
     ConfigText.LoadFromFile(FPCCFG);
@@ -597,9 +743,10 @@ begin
           aCPU:=Copy(s,1,i-1);
           aOS:=Trim(Copy(s,i+1,MaxInt));
 
+          {
           aArch:='';
           // try to distinguish between different ARM CPU versons ... very experimental and [therefor] only for Linux
-          if (UpperCase(aCPU)='ARM') AND (UpperCase(aOS)='LINUX') then
+          if (UpperCase(aCPU)=GetCPU(TCPU.arm)) AND (UpperCase(aOS)=GetOS(TOS.linux)) then
           begin
             for i:=SnipBegin to SnipBegin+5 do
             begin
@@ -614,48 +761,95 @@ begin
               end;
             end;
           end;
+          }
+
+          if (Sender=nil) then
+            Form2.SetCrossAvailable(GetTCPU(aCPU),GetTOS(aOS),GetTSubarch(aSubArch),true);
+
+          // try to distinguish between different Solaris versons
+          if (aOS=GetOS(TOS.solaris)) then
+          begin
+            i:=SnipBegin;
+            while true do
+            begin
+              s:=ConfigText.Strings[i];
+              if (Pos('-FD',s)>0) AND (Pos('-solaris-oi',s)>0) then
+              begin
+                aOS:='solaris-oi';
+                break;
+              end;
+              Inc(i);
+              if (i>=ConfigText.Count) OR (s=SnipMagicEnd) then break;
+            end;
+          end;
+
+          // try to distinguish between different Linux versons
+          if (aOS=GetOS(TOS.linux)) then
+          begin
+            i:=SnipBegin;
+            while true do
+            begin
+              s:=ConfigText.Strings[i];
+              if (Pos('-FD',s)>0) AND (Pos('-musllinux',s)>0) then
+              begin
+                aOS:='linux-musl';
+                break;
+              end;
+              Inc(i);
+              if (i>=ConfigText.Count) OR (s=SnipMagicEnd) then break;
+            end;
+          end;
+
+          // try to get CPU for arm-linux
+          aSubArch:='';
+          if (aOS=GetOS(TOS.linux)) AND (aCPU=GetCPU(TCPU.arm)) then
+          begin
+            i:=SnipBegin;
+            while true do
+            begin
+              s:=ConfigText.Strings[i];
+              if (Pos('-Cp',s)=1) then
+              begin
+                aSubArch:=Trim(Copy(s,Length('-Cp')+1,MaxInt));
+                if aSubArch='ARMV6' then aCPU:='armv6';
+                break;
+              end;
+              Inc(i);
+              if (i>=ConfigText.Count) OR (s=SnipMagicEnd) then break;
+            end;
+          end;
 
           aRadiogroup_CPU:=aCPU;
           aRadiogroup_OS:=aOS;
-          if aRadiogroup_CPU='powerpc' then aRadiogroup_CPU:='ppc';
-          if aRadiogroup_CPU='powerpc64' then aRadiogroup_CPU:='ppc64';
+          if aRadiogroup_CPU=GetCPU(TCPU.powerpc) then aRadiogroup_CPU:='ppc';
+          if aRadiogroup_CPU=GetCPU(TCPU.powerpc64) then aRadiogroup_CPU:='ppc64';
           if aRadiogroup_OS='iphonesim' then aRadiogroup_OS:='i-sim';
-
-          if (aOS='windows') or (aOS='win32') or (aOS='win64') then
-          begin
-            if aCPU='i386' then aOS:='win32';
-            if aCPU='x86_64' then aOS:='win64';
-            aRadiogroup_OS:='windows';
-          end;
+          if ( (aOS=GetOS(TOS.win32)) or (aOS=GetOS(TOS.win64)) ) then aRadiogroup_OS:='windows';
 
           //this chek is redundant, but ok for a final check ... ;-)
-          if (ConfigText.IndexOf(SnipMagicBegin+aCPU+'-'+aOS)<>-1) then
+          //if (ConfigText.IndexOf(SnipMagicBegin+aCPU+'-'+aOS)<>-1) then
           begin
             // list all available compilers
             if (Sender=nil) then AddMessage(upBuildAllCrossCompilersFound+aCPU + '-' + aOS);
             // build all available compilers
             if (Sender<>nil) then
             begin
-              {$ifdef win32}
-              // On win32, we always build a win64 cross-compiler.
-              // So, if the win32 install is updated, this cross-compiler is also updated already auto-magically.
-              // We can skip it here, in that case.
-              if aOS='win64' then
-              begin
-                Inc(SnipBegin);
-                continue;
-              end;
-              {$endif}
               CommandOutputScreen.ClearAll;
+              aResultMessage:='Finished building of cross-compilers.';
               AddMessage(upBuildAllCrossCompilersFound+aCPU + '-' + aOS);
               AddMessage(upBuildAllCrossCompilersUpdate);
               radgrpCPU.ItemIndex:=radgrpCPU.Items.IndexOf(aRadiogroup_CPU);
               radgrpOS.ItemIndex:=radgrpOS.Items.IndexOf(aRadiogroup_OS);
-              success:=InstallCrossCompiler(nil);
+              success:=ButtonProcessCrossCompiler(nil);
               if success
                 then memoSummary.Lines.Append('Cross-compiler update ok.')
                 else memoSummary.Lines.Append('Failure during update of cross-compiler !!');
               memoSummary.Lines.Append('');
+              if (NOT success) then
+              begin
+                aResultMessage:='Building of cross-compilers ended with some error(s).';
+                break;
+              end;
             end;
           end;
         end;
@@ -669,26 +863,26 @@ begin
 
       if (NOT success) then break;
 
-      aOS:=GetEnumNameSimple(TypeInfo(TOS),Ord(OSType));
+      aOS:=GetOS(OSType);
 
       for CPUType := Low(TCPU) to High(TCPU) do
       begin
 
         if (NOT success) then break;
 
-        aCPU:=GetEnumNameSimple(TypeInfo(TCPU),Ord(CPUType));
+        aCPU:=GetCPU(CPUType);
 
         // tricky; see above; improvement todo
         aRadiogroup_CPU:=aCPU;
         aRadiogroup_OS:=aOS;
-        if aRadiogroup_CPU='powerpc' then aRadiogroup_CPU:='ppc';
-        if aRadiogroup_CPU='powerpc64' then aRadiogroup_CPU:='ppc64';
+        if aRadiogroup_CPU=GetCPU(TCPU.powerpc) then aRadiogroup_CPU:='ppc';
+        if aRadiogroup_CPU=GetCPU(TCPU.powerpc64) then aRadiogroup_CPU:='ppc64';
         if aRadiogroup_OS='iphonesim' then aRadiogroup_OS:='i-sim';
 
-        if (aOS='windows') or (aOS='win32') or (aOS='win64') then
+        if (aOS='windows') or (aOS=GetOS(TOS.win32)) or (aOS=GetOS(TOS.win64)) then
         begin
-          if aCPU='i386' then aOS:='win32';
-          if aCPU='x86_64' then aOS:='win64';
+          if aCPU=GetCPU(TCPU.i386) then aOS:=GetOS(TOS.win32);
+          if aCPU=GetCPU(TCPU.x86_64) then aOS:=GetOS(TOS.win64);
           aRadiogroup_OS:='windows';
         end;
 
@@ -696,7 +890,7 @@ begin
         // On win32, we always build a win64 cross-compiler.
         // So, if the win32 install is updated, this cross-compiler is also updated already auto-magically.
         // We can skip it here, in that case.
-        if aOS='win64' then continue;
+        if aOS=GetOS(TOS.win64) then continue;
         {$endif}
 
         // take into account that there are more ARM CPU settings !!
@@ -737,6 +931,11 @@ begin
 
   result:=success;
 
+  if (Sender<>nil) then
+  begin
+    AddMessage('');
+    AddMessage(aResultMessage,True);
+  end;
 end;
 
 procedure TForm1.InitFPCupManager;
@@ -744,6 +943,7 @@ var
   SortedModules: TStringList;
   i:integer;
   s,v:string;
+  SettingsSuccess:boolean;
 begin
   FPCupManager:=TFPCupManager.Create;
   FPCupManager.ConfigFile:=SafeGetApplicationPath+installerUniversal.CONFIGFILENAME;
@@ -776,7 +976,12 @@ begin
           SortedModules.Delete(i);
           continue;
         end;
-        if (AnsiEndsText(_CLEAN,s)) OR (AnsiEndsText(_UNINSTALL,s)) then
+        if (AnsiStartsText(_DECLARE+_SUGGESTED,s)) OR (AnsiStartsText(_DECLARE+_SUGGESTEDADD,s)) then
+        begin
+          SortedModules.Delete(i);
+          continue;
+        end;
+        if (AnsiEndsText(_CLEAN,s)) OR (AnsiEndsText(_UNINSTALL,s)) OR (AnsiEndsText(_BUILD+_ONLY,s)) then
         begin
           SortedModules.Delete(i);
           continue;
@@ -803,8 +1008,19 @@ begin
   FPCupManager.HTTPProxyPassword:=Form2.HTTPProxyPass;
 
   // localize FPCUPSettings if possible
-  if (NOT GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir)))
-     then GetFPCUPSettings(SafeGetApplicationPath);
+
+  SettingsSuccess:=GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
+  if (NOT SettingsSuccess) then SettingsSuccess:=GetFPCUPSettings(SafeGetApplicationPath);
+
+  if (SettingsSuccess and DirectoryExists(sInstallDir)) then
+  begin
+    s:=ConcatPaths([sInstallDir,'fpcsrc']);
+    if DirectoryExists(s) then
+      FPCupManager.FPCSourceDirectory:=s;
+    s:=ConcatPaths([sInstallDir,'lazarus']);
+    if DirectoryExists(s) then
+      FPCupManager.LazarusSourceDirectory:=s;
+  end;
 end;
 
 
@@ -817,33 +1033,28 @@ begin
              begin
                exit;
              end;
-
   if Assigned(FPCupManager.Sequencer) then
   begin
     FPCupManager.Sequencer.Kill;
   end;
-  // brute force ... nothing better at the moment
-  // but still does not work when downloading from SVN
-  // the process that gets created when downloading if not reachable from here through the fpcupmanager
-  FPCupManager.Destroy;
-  InitFPCupManager;
-  //DisEnable(Sender,True);
 end;
 
 procedure TForm1.btnGetOpenSSLClick(Sender: TObject);
+{$ifdef MSWindows}
 var
   OpenSSLZip,OpenSSLURL:string;
   Success:boolean;
+  {$endif MSWindows}
 begin
   {$ifdef MSWindows}
   OpenSSLURL:=OpenSSLSourceURL[Low(OpenSSLSourceURL)];
-  OpenSSLZip:=IncludeTrailingPathDelimiter(GetWindowsDownloadFolder)+GetFileNameFromURL(OpenSSLURL);
+  OpenSSLZip:=IncludeTrailingPathDelimiter(GetWindowsDownloadFolder)+FileNameFromURL(OpenSSLURL);
   SysUtils.Deletefile(OpenSSLZip);
   Success:=OpenURL(OpenSSLURL);
   if (NOT Success) then
   begin
     OpenSSLURL:=OpenSSLSourceURL[High(OpenSSLSourceURL)];
-    OpenSSLZip:=IncludeTrailingPathDelimiter(GetWindowsDownloadFolder)+GetFileNameFromURL(OpenSSLURL);
+    OpenSSLZip:=IncludeTrailingPathDelimiter(GetWindowsDownloadFolder)+FileNameFromURL(OpenSSLURL);
     SysUtils.Deletefile(OpenSSLZip);
     Success:=OpenURL(OpenSSLURL);
   end;
@@ -877,6 +1088,45 @@ begin
   {$endif MSWindows}
 end;
 
+procedure TForm1.Button1Click(Sender: TObject);
+begin
+
+end;
+
+procedure TForm1.ChkMakefileFPCClick(Sender: TObject);
+begin
+  DisEnable(Sender,False);
+
+  try
+
+    if (Sender=ChkMakefileLaz) OR (Sender=ChkMakefileFPC) then
+    begin
+      PrepareRun;
+      if Sender=ChkMakefileLaz then FPCupManager.OnlyModules:=_MAKEFILECHECKLAZARUS;
+      if Sender=ChkMakefileFPC then FPCupManager.OnlyModules:=_MAKEFILECHECKFPC;
+      sStatus:='Going to check Makefile.';
+      {$ifdef RemoteLog}
+      aDataClient.UpInfo.UpFunction:=ufCheckMakefile;
+      {$endif}
+      RealRun;
+    end;
+
+    if Sender=CreateStartup then
+    begin
+      PrepareRun;
+      FPCupManager.OnlyModules:=_CREATESCRIPT;
+      sStatus:='Going to create startup scripts.';
+      {$ifdef RemoteLog}
+      aDataClient.UpInfo.UpFunction:=ufCreateStartup;
+      {$endif}
+      RealRun;
+    end;
+
+  finally
+    DisEnable(Sender,True);
+  end;
+end;
+
 procedure TForm1.TargetSelectionChange(Sender: TObject; User: boolean);
 begin
   if (NOT User) then exit;
@@ -888,35 +1138,15 @@ begin
   ShowAboutForm;
 end;
 
-procedure TForm1.radgrpCPUClick(Sender: TObject);
-begin
-  if (radgrpCPU.ItemIndex<>-1) then
-  begin
-  if (radgrpCPU.Items[radgrpCPU.ItemIndex]='i8086') then
-    begin
-      radgrpOS.ItemIndex:=-1;
-      radgrpOS.Enabled:=false;
-    end
-    else radgrpOS.Enabled:=true;
-  end
-end;
-
-procedure TForm1.radgrpOSClick(Sender: TObject);
-begin
-  if (radgrpOS.ItemIndex<>-1) then
-  begin
-    if (radgrpOS.Items[radgrpOS.ItemIndex]='java') OR (radgrpOS.Items[radgrpOS.ItemIndex]='msdos') then
-    begin
-      radgrpCPU.ItemIndex:=-1;
-      radgrpCPU.Enabled:=false;
-    end else radgrpCPU.Enabled:=true;
-  end;
-end;
-
 procedure TForm1.CommandOutputScreenMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
 begin
+  {$if defined(Darwin) or defined(macOS) or defined(iphonesim) or defined(ios)}
+  if ssMeta in Shift then
+  {$else}
   if ssCtrl in Shift then
+  {$endif}
+  //if ssModifier in Shift then // as defined in controls.pp
   begin
     if (WheelDelta>0) AND (CommandOutputScreen.Font.Size<48) then CommandOutputScreen.Font.Size:=CommandOutputScreen.Font.Size+1;
     if (WheelDelta<0)  AND (CommandOutputScreen.Font.Size>2) then CommandOutputScreen.Font.Size:=CommandOutputScreen.Font.Size-1;
@@ -950,7 +1180,6 @@ begin
     memoSummary.Lines.Append(s);
   end;
 
-
   // warn about time consuming module operations
   if ExistWordInString(PChar(s),'UniversalInstaller (GetModule:',[soWholeWord,soDown]) then
   begin
@@ -967,12 +1196,14 @@ begin
   begin
     // warn about time consuming FPC and Lazarus operations
     if (
+      (ExistWordInString(PChar(s),'downloadfromftp',[soWholeWord,soDown]))
+      OR
       (ExistWordInString(PChar(s),'checkout',[soWholeWord,soDown])) AND (ExistWordInString(PChar(s),'--quiet',[soWholeWord,soDown]))
       OR
       (ExistWordInString(PChar(s),'clone',[soWholeWord,soDown])) AND (ExistWordInString(PChar(s),'--recurse-submodules',[soWholeWord,soDown]))
     ) then
     begin
-      memoSummary.Lines.Append(BeginSnippet + ' Performing a SVN/GIT/HG checkout ... please wait, could take some time.');
+      memoSummary.Lines.Append(BeginSnippet + ' Performing a SVN/GIT/HG/FTP checkout ... please wait, could take some time.');
     end;
   end;
 
@@ -1010,11 +1241,33 @@ begin
   end;
   *)
 
+  if ( Assigned(FPCUpManager) AND (NOT FPCUpManager.SwitchURL) ) then
+  begin
+    if (ExistWordInString(PChar(s),URL_ERROR,[soDown])) then
+    begin
+      s:=
+      'Fpcupdeluxe encountered a (fatal) URL error.' + sLineBreak +
+      'Most common cause: overwtiting an existing install.' + sLineBreak +
+      'Sources with different URL cannot be installed in same directory.' + sLineBreak +
+      'Please select an new install directory when changing versions.';
+      Application.MessageBox(PChar(s), PChar('URL mismatch error'), MB_ICONSTOP);
+    end;
+  end;
+
   if (ExistWordInString(PChar(s),'Error 217',[soDown])) then
   begin
     memoSummary.Lines.Append('We have a fatal FPC runtime error 217: Unhandled exception occurred.');
     memoSummary.Lines.Append('See: https://www.freepascal.org/docs-html/user/userap4.html');
-    memoSummary.Lines.Append('Can be caused by anything unknown. No clues about cause whatsoever.');
+    memoSummary.Lines.Append('Most common cause: a stray fpc process still running.');
+    memoSummary.Lines.Append('Please check the task manager for FPC or PPC processes that are still active.');
+    memoSummary.Lines.Append('Re-running fpcupdeluxe does work in most cases however !. So, just do a restart.');
+    s:=
+    'We have a fatal FPC runtime error 217: Unhandled exception occurred.' + sLineBreak +
+    'Most common cause: a stray fpc process still running.' + sLineBreak +
+    'Please check the task manager for FPC or PPC processes that are still active.' + sLineBreak +
+    'This sometime happens, due to causes unknown (to me) yet.' + sLineBreak +
+    'Just quiting fpcupdeluxe and running it again will result in success.';
+    Application.MessageBox(PChar(s), PChar('FPC runtime error 217'), MB_ICONSTOP);
   end;
 
   searchstring:='make (e=';
@@ -1079,7 +1332,7 @@ begin
         begin
           memoSummary.Lines.Append('FPC revision 30351 introduced some changed into the compiler causing this error.');
           memoSummary.Lines.Append('Has something todo about how floating points are handled. And that has changed.');
-          memoSummary.Lines.Append('See: http://svn.freepascal.org/cgi-bin/viewvc.cgi?view=revision&revision=30351');
+          memoSummary.Lines.Append('See: https://svn.freepascal.org/cgi-bin/viewvc.cgi?view=revision&revision=30351');
         end;
 
         if (InternalError='2013051401') then
@@ -1109,8 +1362,8 @@ begin
           memoSummary.Lines.Append('So update your FPC trunk to a revision >= 37621 !!');
           //memoSummary.Lines.Append('See: https://svn.freepascal.org/cgi-bin/viewvc.cgi?view=revision&revision=37621');
           //memoSummary.Lines.Append('See: https://bugs.freepascal.org/view.php?id=32502');
-          //memoSummary.Lines.Append('See: http://bugs.freepascal.org/view.php?id=29892');
-          //memoSummary.Lines.Append('See: http://bugs.freepascal.org/view.php?id=9262');
+          //memoSummary.Lines.Append('See: https://bugs.freepascal.org/view.php?id=29892');
+          //memoSummary.Lines.Append('See: https://bugs.freepascal.org/view.php?id=9262');
         end;
       end;
     end
@@ -1134,6 +1387,14 @@ begin
       memoSummary.Lines.Append('Missing some tools: please install missing tools!');
       {$endif}
     end
+    {$ifdef Darwin}
+    else if (ExistWordInString(PChar(s),'The subversion command line tools are no longer provided by Xcode',[soDown])) then
+    begin
+      MissingTools:=true;
+      memoSummary.Lines.Append('SVN is no longer included in Xcode command line tools !');
+      memoSummary.Lines.Append('Use a GIT repo or install SVN by yourself (brew).');
+    end
+    {$endif}
     else if (Pos('error: 256',lowercase(s))>0) AND (Pos('svn',lowercase(s))>0) then
     begin
       memoSummary.Lines.Append('We have had a SVN connection failure. Just start again !');
@@ -1155,6 +1416,13 @@ begin
     end;
   end;
 
+  //Lazbuild error
+  if (ExistWordInString(PChar(s),'Unable to open the package',[soDown])) then
+  begin
+    memoSummary.Lines.Append(s);
+    memoSummary.Lines.Append('Package source is missing. Please check your Lazarus config files.');
+  end;
+
   // linker error
   if (ExistWordInString(PChar(s),'/usr/bin/ld: cannot find',[soDown])) then
   begin
@@ -1174,9 +1442,9 @@ begin
   end;
 
   // RAM errors
-  if (ExistWordInString(PChar(s),'Can''t call the assembler',[soDown])) OR (ExistWordInString(PChar(s),'Can''t call the resource compiler',[soDown])) then
+  if (ExistWordInString(PChar(s),'call the assembler',[soDown])) OR (ExistWordInString(PChar(s),'call the resource compiler',[soDown])) then
   begin
-    memoSummary.Lines.Append(BeginSnippet+' Most likely, there is not enough RAM (swap) to finish this operation.');
+    memoSummary.Lines.Append(BeginSnippet+' Most (99%) likely, there is not enough RAM (swap) to finish this operation.');
     memoSummary.Lines.Append(BeginSnippet+' Please add some RAM or swap-space (+1GB) and re-run fpcupdeluxe.');
   end;
 
@@ -1194,6 +1462,11 @@ begin
 
   if ExistWordInString(PChar(s),BeginSnippet,[soWholeWord,soDown]) then
   begin
+    if ExistWordInString(PChar(s),'revision:',[soWholeWord,soDown]) then
+    begin
+      // repeat fpcupdeluxe warning
+      memoSummary.Lines.Append(s);
+    end;
     if ExistWordInString(PChar(s),Seriousness[etWarning],[soWholeWord,soDown]) then
     begin
       // repeat fpcupdeluxe warning
@@ -1257,18 +1530,9 @@ begin
   begin
     if ExistWordInString(PChar(s),Seriousness[etInfo],[soWholeWord,soDown]) then
     begin
-      if
-      NOT (ExistWordInString(PChar(s),'Extracted #',[soDown])
-      OR
-      ExistWordInString(PChar(s),'Extracting ',[soDown])
-      OR
-      ExistWordInString(PChar(s),'Download progress ',[soDown]))
-      then
-      begin
-        FG      := clYellow;
-        BG      := clBlack;
-        Special := True;
-      end;
+      FG      := clYellow;
+      BG      := clBlack;
+      Special := True;
     end;
     if ExistWordInString(PChar(s),Seriousness[etWarning],[soWholeWord,soDown]) then
     begin
@@ -1276,6 +1540,35 @@ begin
       BG      := clBlack;
       Special := True;
     end;
+    if ExistWordInString(PChar(s),Seriousness[etError],[soWholeWord,soDown]) then
+    begin
+      FG      := clRed;
+      BG      := clWhite;
+      Special := True;
+    end;
+  end;
+
+  if (NOT Special)
+  AND
+  (
+    (AnsiStartsStr('FPCupdeluxe basedir:',s))
+    OR
+    (AnsiStartsStr('FPC URL:',s))
+    OR
+    (AnsiStartsStr('Lazarus URL:',s))
+  )
+  then
+  begin
+    FG      := clRed;
+    BG      := clBlack;
+    Special := True;
+  end;
+
+  if (NOT Special) AND ExistWordInString(PChar(s),'Found valid',[soWholeWord,soDown]) then
+  begin
+    FG      := clOlive;
+    BG      := clBlack;
+    Special := True;
   end;
 
   if (NOT Special) AND ExistWordInString(PChar(s),'executing:',[soWholeWord,soDown]) then
@@ -1292,10 +1585,10 @@ begin
     Special := True;
   end;
 
-  if (NOT Special) AND ExistWordInString(PChar(s),'Please wait:',[soWholeWord,soDown]) then
+  if (NOT Special) AND ((ExistWordInString(PChar(s),'HEAD is now at ',[soDown])) OR (ExistWordInString(PChar(s),'Last Changed ',[soDown]))) then
   begin
-    FG      := clBlue;
-    BG      := clWhite;
+    FG      := clMoneyGreen;
+    BG      := clBlack;
     Special := True;
   end;
 
@@ -1348,8 +1641,6 @@ begin
   if (NOT Special)
   AND
   (
-    (ExistWordInString(PChar(s),'HEAD is now at ',[soDown])) // for GIT info
-    OR
     (ExistWordInString(PChar(s),'lines compiled,',[soDown]))
     OR
     (ExistWordInString(PChar(s),'issued',[soWholeWord,soDown]))
@@ -1360,11 +1651,17 @@ begin
     OR
     (ExistWordInString(PChar(s),'make: ',[soDown]))
     OR
+    (ExistWordInString(PChar(s),'make[',[soDown]))
+    OR
+    (ExistWordInString(PChar(s),'dependency dropped',[soDown]))
+    OR
     ( ExistWordInString(PChar(s),'echo ',[soDown]) AND ExistWordInString(PChar(s),'revision.inc',[soDown]) )
     OR
     ( ExistWordInString(PChar(s),'Start ',[soDown]) AND ExistWordInString(PChar(s),'now ',[soDown]) )
     OR
     (ExistWordInString(PChar(s),'this could take some time',[soDown]))
+    OR
+    (ExistWordInString(PChar(s),'Skipped package',[soWholeWord,soDown]))
     OR
     (
       (ExistWordInString(PChar(s),'writing',[soDown]))
@@ -1406,7 +1703,10 @@ begin
 
   if (NOT Special) AND (ExistWordInString(PChar(s),'make.exe ',[soDown]) OR ExistWordInString(PChar(s),'make ',[soDown]) OR ExistWordInString(PChar(s),'gmake ',[soDown])) then
   begin
-    FG      := TColor($FF8C00);
+    if ExistWordInString(PChar(s),'fpmake ',[soDown]) then
+      FG      := TColor($FFA000)
+    else
+      FG      := TColor($FF8C00);
     BG      := clBlack;
     Special := True;
   end;
@@ -1433,6 +1733,20 @@ begin
     Special := True;
   end;
 
+  if (NOT Special) AND ExistWordInString(PChar(s),'Extracted #',[soDown]) then
+  begin
+    BG      := clBlack;
+    FG      := clSilver;
+    Special := True;
+  end;
+
+  if (NOT Special) AND ExistWordInString(PChar(s),'Download progress ',[soDown]) then
+  begin
+    BG      := clBlack;
+    FG      := TColor($0045FF);
+    Special := True;
+  end;
+
   // special override for debugging statemachine
   if ExistWordInString(PChar(s),'sequencer',[soWholeWord,soDown]) then
   begin
@@ -1443,13 +1757,21 @@ begin
     end;
   end;
 
-  if (ExistWordInString(PChar(s),'error:',[soWholeWord,soDown])) OR  (ExistWordInString(PChar(s),'fatal:',[soWholeWord,soDown])) then
+  // lazbuild error
+  if (NOT Special) AND (ExistWordInString(PChar(s),'Unable to open the package',[soDown]) OR ExistWordInString(PChar(s),'Unable to load package',[soDown])) then
+  begin
+    FG      := clRed;
+    BG      := clPurple;
+    Special := True;
+  end;
+
+  if (ExistWordInString(PChar(s),'error:',[soWholeWord,soDown])) OR (ExistWordInString(PChar(s),'fatal:',[soWholeWord,soDown])) OR (ExistWordInString(PChar(s),'Memory warning:',[soWholeWord,soDown])) then
   begin
     // skip git fatal messages ... they are not that fatal ... but not sure yet !
     // if (Pos('fatal: not a git repository',lowercase(s))=0) then
     begin
-      FG      := clRed;
-      BG      := clBlue;
+      FG      := TColor($0060FF);
+      BG      := TColor($402000);
       Special := True;
     end;
   end;
@@ -1465,96 +1787,211 @@ begin
      then alternateui_AddMessage(s,false,FG)
      else alternateui_AddMessage(s,false,clLime);
   {$endif}
+end;
 
+procedure TForm1.PageControl1Change(Sender: TObject);
+var
+  aFileList:TStringList;
+begin
+  if TPageControl(Sender).ActivePage=TagSheet then
+  begin
+    Application.ProcessMessages;
+    aFileList:=TStringList.Create;
+    ListBoxFPCTargetTag.Items.BeginUpdate;
+    ListBoxLazarusTargetTag.Items.BeginUpdate;
+    try
+      aFileList.Clear;
+      GetSVNFileList(FPCBASESVNURL+'/cgi-bin/viewvc.cgi/tags/?root=fpc',aFileList);
+      ListBoxFPCTargetTag.Items.Text:=aFileList.Text;
+      aFileList.Clear;
+      GetSVNFileList(FPCBASESVNURL+'/cgi-bin/viewvc.cgi/tags/?root=lazarus',aFileList);
+      ListBoxLazarusTargetTag.Items.Text:=aFileList.Text;
+    finally
+      aFileList.Free;
+      ListBoxLazarusTargetTag.Items.EndUpdate;
+      ListBoxFPCTargetTag.Items.EndUpdate;
+    end;
+    //Do this only once !!
+    TPageControl(Sender).OnChange:=nil;
+  end;
+end;
 
+procedure TForm1.OnlyTagClick(Sender: TObject);
+var
+  aNewURL:string;
+begin
+  if Sender=BitBtnFPCOnlyTag then
+  begin
+    aNewURL:=FPCBASESVNURL+'/svn/fpc/tags/'+ListBoxFPCTargetTag.GetSelectedText;
+    if SetAlias('fpcURL',ListBoxFPCTargetTag.GetSelectedText,aNewURL) then
+    begin
+      ListBoxFPCTarget.Items.CommaText:=installerUniversal.GetAlias('fpcURL','list');
+      MemoAddTag.Lines.Clear;
+      MemoAddTag.Lines.Add('The tag with name ['+ListBoxFPCTargetTag.GetSelectedText+'] and URL ['+aNewURL+'] was added to the bottom of the FPC list.');
+      //ListBoxFPCTarget.ItemIndex:=ListBoxFPCTarget.Count-1;
+    end;
+  end;
+  if Sender=BitBtnLazarusOnlyTag then
+  begin
+    aNewURL:=FPCBASESVNURL+'/svn/lazarus/tags/'+ListBoxLazarusTargetTag.GetSelectedText;
+    if SetAlias('lazURL',ListBoxLazarusTargetTag.GetSelectedText,aNewURL) then
+    begin
+      ListBoxLazarusTarget.Items.CommaText:=installerUniversal.GetAlias('lazURL','list');
+      MemoAddTag.Lines.Clear;
+      MemoAddTag.Lines.Add('The tag with name ['+ListBoxLazarusTargetTag.GetSelectedText+'] and URL ['+aNewURL+'] was added to the bottom of the Lazarus list.');
+      //ListBoxLazarusTarget.ItemIndex:=ListBoxLazarusTarget.Count-1;
+    end;
+  end;
+end;
+
+procedure TForm1.TagSelectionChange(Sender: TObject;User: boolean);
+begin
+  MemoAddTag.Lines.Clear;
+  MemoAddTag.Lines.Add(TListBox(Sender).GetSelectedText);
+end;
+
+procedure TForm1.btnUpdateLazarusMakefilesClick(Sender: TObject);
+begin
+end;
+
+procedure TForm1.IniPropStorageAppRestoringProperties(Sender: TObject);
+begin
+  SessionProperties := 'WindowState;Width;Height;Top;Left;CmdFontSize;';
+  //Width := MulDiv(Width, 96, Screen.PixelsPerInch);
+  //Height := MulDiv(Height, 96, Screen.PixelsPerInch);
+end;
+
+procedure TForm1.IniPropStorageAppSavingProperties(Sender: TObject);
+begin
+  if Self.WindowState=wsMaximized then
+    SessionProperties := 'WindowState;CmdFontSize;'
+  else
+    SessionProperties := 'WindowState;Width;Height;Top;Left;CmdFontSize;';
+end;
+
+procedure TForm1.radgrpTargetChanged(Sender: TObject);
+var
+  CPUType:TCPU;
+  OSType:TOS;
+begin
+  CPUType:=TCPU.cpuNone;
+  OSType:=TOS.osNone;
+  if (radgrpOS.ItemIndex<>-1) then
+    OSType:=GetTOS(radgrpOS.Items[radgrpOS.ItemIndex]);
+  if (radgrpCPU.ItemIndex<>-1) then
+    CPUType:=GetTCPU(radgrpCPU.Items[radgrpCPU.ItemIndex]);
+  ButtonSubarchSelect.Enabled:=((OSType in SUBARCH_OS) AND (CPUType in SUBARCH_CPU));
+end;
+
+procedure TForm1.actFileSaveAccept(Sender: TObject);
+begin
+  CommandOutputScreen.Lines.SaveToFile(actFileSave.Dialog.FileName);
 end;
 
 procedure TForm1.QuickBtnClick(Sender: TObject);
 var
   s:string;
+  aFPCTarget:string;
+  aLazarusTarget:string;
+  aModule:string;
 begin
+  s:='';
+
+  aFPCTarget:='';
+  aLazarusTarget:='';
+  aModule:='';
+
+  if Sender=TrunkBtn then
+  begin
+    s:='Going to install both FPC trunk and Lazarus trunk.';
+    aFPCTarget:='trunk';
+    aLazarusTarget:='trunk';
+  end;
+
+  if Sender=FixesBtn then
+  begin
+    s:='Going to install FPC fixes and Lazarus fixes.';
+    aFPCTarget:='fixes';
+    aLazarusTarget:='fixes';
+  end;
+
+  if Sender=StableBtn then
+  begin
+    s:='Going to install FPC stable and Lazarus stable.';
+    aFPCTarget:='stable';
+    aLazarusTarget:='stable';
+  end;
+
+  if Sender=OldBtn then
+  begin
+    s:='Going to install FPC 2.6.4 and Lazarus 1.4.';
+    aFPCTarget:='2.6.4';
+    aLazarusTarget:='1.4';
+  end;
+
+  {
+  if Sender=DinoBtn then
+  begin
+    s:='Going to install FPC 2.0.2 and Lazarus 0.9.16.';
+    aFPCTarget:='2.0.2';
+    //aLazarusTarget:='0.9.4';
+    aLazarusTarget:='0.9.16';
+  end;
+  }
+
+  if Sender=EmbeddedBtn then
+  begin
+    s:='Going to install FPC and Lazarus for SAM embedded.';
+    aFPCTarget:='embedded-mir';
+    aLazarusTarget:='embedded';
+    //aModule:='mbf,pxl';
+    aModule:='mbf';
+  end;
+
+  if Sender=mORMotBtn then
+  begin
+    s:='Going to install the mORMot.';
+    aModule:='mORMot';
+    //aModule:='mORMot,zeos';
+  end;
+
+  if Sender=mORMot2Btn then
+  begin
+    s:='Going to install the mORMot2.';
+    aModule:='mORMot2';
+    //aModule:='mORMot2,zeos';
+  end;
+
+  if Sender=OPMBtn then
+  begin
+    s:='Going to install the Online Package Manager.';
+    aModule:='opm';
+  end;
+
+  s:=s+sLineBreak;
+  s:=s+'Install directory: '+Self.sInstallDir;
+  s:=s+sLineBreak;
+  s:=s+'Do you want to continue ?';
+  if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then exit;
+
 
   DisEnable(Sender,False);
   try
+
+    if (Length(aFPCTarget)>0) then
+      FPCTarget:=aFPCTarget;
+    if (Length(aLazarusTarget)>0) then
+      LazarusTarget:=aLazarusTarget;
+
     PrepareRun;
 
-    if Sender=TrunkBtn then
+    if (Length(aModule)>0)then
     begin
-      s:='Going to install both FPC trunk and Lazarus trunk';
-      FPCTarget:='trunk';
-      LazarusTarget:='trunk';
+      if ((Length(aFPCTarget)=0) AND (Length(aLazarusTarget)=0)) then
+        FPCupManager.OnlyModules:=aModule
+      else
+        FPCupManager.IncludeModules:=aModule;
     end;
-
-    {
-    if Sender=NPBtn then
-    begin
-      s:='Going to install NewPascal release';
-      FPCTarget:='newpascalgit';
-      //FPCBranch:='release';
-      LazarusTarget:='newpascalgit';
-      //LazarusBranch:='release';
-      //FPCupManager.IncludeModules:='mORMot';
-    end;
-    }
-
-    if Sender=FixesBtn then
-    begin
-      s:='Going to install FPC fixes and Lazarus fixes';
-      FPCTarget:='fixes';
-      LazarusTarget:='fixes';
-    end;
-
-    if Sender=StableBtn then
-    begin
-      s:='Going to install FPC stable and Lazarus stable';
-      FPCTarget:='stable';
-      LazarusTarget:='stable';
-    end;
-
-    if Sender=OldBtn then
-    begin
-      s:='Going to install FPC 2.6.4 and Lazarus 1.4 ';
-      FPCTarget:='2.6.4';
-      LazarusTarget:='1.4';
-    end;
-
-    {
-    if Sender=DinoBtn then
-    begin
-      s:='Going to install FPC 2.0.2 and Lazarus 0.9.16 ';
-      FPCTarget:='2.0.2';
-      //LazarusTarget:='0.9.4';
-      LazarusTarget:='0.9.16';
-      FPCupManager.OnlyModules:=_FPC+','+_OLDLAZARUS;
-    end;
-    }
-
-    if Sender=EmbeddedBtn then
-    begin
-      s:='Going to install FPC and Lazarus for SAM embedded ';
-      FPCTarget:='embedded';
-      LazarusTarget:='embedded';
-      //FPCupManager.IncludeModules:='mbf,pxl';
-      FPCupManager.IncludeModules:='mbf';
-    end;
-
-    if Sender=mORMotBtn then
-    begin
-      s:='Going to install the mORMot ';
-      FPCupManager.OnlyModules:='mORMot';
-      //FPCupManager.OnlyModules:='mORMot,zeos';
-    end;
-
-    if Sender=OPMBtn then
-    begin
-      s:='Going to install the Online Package Manager ';
-      FPCupManager.OnlyModules:='opm';
-      //FPCupManager.OnlyModules:='mORMot,zeos';
-    end;
-
-
-    FPCupManager.FPCURL:=FPCTarget;
-    FPCupManager.LazarusURL:=LazarusTarget;
 
     if (NOT Form2.IncludeHelp) then
     begin
@@ -1564,7 +2001,7 @@ begin
     else
     begin
       if Length(FPCupManager.IncludeModules)>0 then FPCupManager.IncludeModules:=FPCupManager.IncludeModules+',';
-      FPCupManager.IncludeModules:=FPCupManager.IncludeModules+'lhelp';
+      FPCupManager.IncludeModules:=FPCupManager.IncludeModules+_LHELP;
     end;
 
     AddMessage(s+'.');
@@ -1572,74 +2009,15 @@ begin
     sStatus:=s;
 
     {$ifdef RemoteLog}
-    aDataClient.UpInfo.UpFunction:=ufInstallFPCLAZ;
-    {$endif}
-
-    RealRun;
-
-  finally
-    DisEnable(Sender,True);
-  end;
-end;
-
-procedure TForm1.BitBtnFPCandLazarusClick(Sender: TObject);
-var
-  FModuleList: TStringList;
-begin
-
-  if (Length(FPCTarget)=0) or (Length(LazarusTarget)=0) then
-  begin
-    ShowMessage('Please select a FPC and Lazarus version first');
-    exit;
-  end;
-
-  {$ifdef CPUAARCH64}
-  if (MessageDlg('Be forwarned: this will only work with FPC 3.2 or trunk (or NewPascal).' + sLineBreak +
-                 'An aarch64 fpcupdeluxe bootstrapper wil be used.' + sLineBreak +
-                 'Do you want to continue ?'
-                 ,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
-                 begin
-                   exit;
-                 end;
-  {$endif CPUAARCH64}
-
-  DisEnable(Sender,False);
-  try
-    PrepareRun;
-
-    AddMessage('Going to install/update FPC and Lazarus with given options.');
-    sStatus:='Going to install/update FPC and Lazarus.';
-
-    if Form2.UpdateOnly then
+    if ((Length(aFPCTarget)>0) OR (Length(aLazarusTarget)>0)) then
     begin
-      // still not working 100% for Lazarus ...  todo
-      // packages that are installed by the user are not included
-      FPCupManager.OnlyModules:=_FPCCLEANBUILDONLY+','+_LAZARUSCLEANBUILDONLY;
-      FModuleList:=TStringList.Create;
-      try
-        GetModuleEnabledList(FModuleList);
-        // also include enabled modules (packages) when rebuilding Lazarus
-        if FModuleList.Count>0 then FPCupManager.OnlyModules:=FPCupManager.OnlyModules+','+FModuleList.CommaText;
-      finally
-        FModuleList.Free;
-      end;
+      aDataClient.UpInfo.UpFunction:=ufInstallFPCLAZ;
     end
     else
     begin
-      if (NOT Form2.IncludeHelp) then
-      begin
-        if Length(FPCupManager.SkipModules)>0 then FPCupManager.SkipModules:=FPCupManager.SkipModules+',';
-        FPCupManager.SkipModules:=FPCupManager.SkipModules+_HELPFPC+','+_HELPLAZARUS
-      end
-      else
-      begin
-        if Length(FPCupManager.IncludeModules)>0 then FPCupManager.IncludeModules:=FPCupManager.IncludeModules+',';
-        FPCupManager.IncludeModules:=FPCupManager.IncludeModules+'lhelp';
-      end;
+      aDataClient.UpInfo.UpFunction:=ufInstallModule;
+      aDataClient.AddExtraData('module',aModule);
     end;
-
-    {$ifdef RemoteLog}
-    aDataClient.UpInfo.UpFunction:=ufInstallFPCLAZ;
     {$endif}
 
     RealRun;
@@ -1653,89 +2031,96 @@ procedure TForm1.btnInstallModuleClick(Sender: TObject);
 var
   //i:integer;
   modules:string;
+  s:string;
 begin
-  //Form3.ShowModal;
-
-  DisEnable(Sender,False);
-
-  try
-    {
-    if Form3.ModalResult=mrYes then
-    begin
-
-    end;
+  if listModules.SelCount=0 then
+  begin
+    AddMessage('Please select a module / package.');
     exit;
-    }
+  end;
 
-    if listModules.SelCount=0 then
+  modules:='';
+
+  //No multi-select for now
+  (*
+  for i:=0 to listModules.Count-1 do
+  begin
+    if listModules.Selected[i] then
     begin
-      AddMessage('Please select a module / package.');
-      exit;
-    end;
-
-    PrepareRun;
-
-    FPCupManager.ExportOnly:=(NOT Form2.PackageRepo);
-
-    modules:='';
-
-    //No multi-select for now
-    (*
-    for i:=0 to listModules.Count-1 do
-    begin
-      if listModules.Selected[i] then
+      modules:=modules+listModules.Items[i];
+      if Sender=btnUninstallModule then modules:=modules+_UNINSTALL else
       begin
-        modules:=modules+listModules.Items[i];
-        if Sender=btnUninstallModule then modules:=modules+_UNINSTALL;
-        modules:=modules+',';
-        {$ifdef RemoteLog}
-        aDataClient.AddExtraData('module'+InttoStr(1),listModules.Items[i]);
-        {$endif}
+        if Form2.UpdateOnly then modules:=modules+_BUILD+_ONLY;
       end;
+      modules:=modules+',';
     end;
-    *)
+  end;
+  *)
 
-    //Single select
-    if (listModules.ItemIndex<>-1) then
+  //Single select
+  if (listModules.ItemIndex<>-1) then
+  begin
+    modules:=listModules.Items.Strings[listModules.ItemIndex];
+    if Sender=btnUninstallModule then modules:=modules+_UNINSTALL else
     begin
-      modules:=listModules.Items.Strings[listModules.ItemIndex];
-      if Sender=btnUninstallModule then modules:=modules+_UNINSTALL;
-      {$ifdef RemoteLog}
-      aDataClient.AddExtraData('module'+InttoStr(1),listModules.Items.Strings[listModules.ItemIndex]);
-      {$endif}
+      if Form2.UpdateOnly then modules:=modules+_BUILD+_ONLY;
+    end;
+  end;
+
+  if Length(modules)>0 then
+  begin
+    //Delete stale trailing comma, if any
+    if RightStr(modules,1)=',' then SetLength(modules,Length(modules)-1);
+
+    s:=modules;
+    s:=StringReplace(s,_UNINSTALL,'',[rfReplaceAll]);
+    s:=StringReplace(s,_BUILD+_ONLY,'',[rfReplaceAll]);
+    if Sender=btnInstallModule then s:='Going to install/update module '+s;
+    if Sender=btnUninstallModule then s:='Going to remove module '+s;
+    s:=s+'.'+sLineBreak;
+    s:=s+'Install directory: '+Self.sInstallDir;
+    s:=s+sLineBreak;
+    s:=s+'Do you want to continue ?';
+    if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then exit;
+
+    if Sender=btnInstallModule then
+    begin
+      AddMessage('Limiting installation/update to '+FPCupManager.OnlyModules);
+      AddMessage('');
+      AddMessage('Going to install selected modules with given options.');
+      sStatus:='Going to install/update selected modules.';
+    end
+    else
+    begin
+      AddMessage('Going to remove selected modules.');
+      sStatus:='Going to remove selected modules.';
     end;
 
-    if Length(modules)>0 then
-    begin
-      //Delete stale trailing comma, if any
-      if RightStr(modules,1)=',' then SetLength(modules,Length(modules)-1);
+    DisEnable(Sender,False);
+    try
+      PrepareRun;
+
+      FPCupManager.ExportOnly:=(NOT Form2.PackageRepo);
       FPCupManager.OnlyModules:=modules;
 
-      if Sender=btnInstallModule then
-      begin
-        AddMessage('Limiting installation/update to '+FPCupManager.OnlyModules);
-        AddMessage('');
-        AddMessage('Going to install selected modules with given options.');
-        sStatus:='Going to install/update selected modules.';
-        {$ifdef RemoteLog}
-        aDataClient.UpInfo.UpFunction:=ufInstallModule;
-        {$endif}
-      end
-      else
-      begin
-        AddMessage('Going to remove selected modules.');
-        sStatus:='Going to remove selected modules.';
-        {$ifdef RemoteLog}
-        aDataClient.UpInfo.UpFunction:=ufUninstallModule;
-        {$endif}
-      end;
+      {$ifdef RemoteLog}
+      s:=modules;
+      s:=StringReplace(s,_UNINSTALL,'',[rfReplaceAll]);
+      s:=StringReplace(s,_BUILD+_ONLY,'',[rfReplaceAll]);
+      aDataClient.AddExtraData('module[s]:',s);
+      if Sender=btnInstallModule then aDataClient.UpInfo.UpFunction:=ufInstallModule;
+      if Sender=btnUninstallModule then aDataClient.UpInfo.UpFunction:=ufUninstallModule;
+      {$endif}
 
       RealRun;
+
+    finally
+      FPCupManager.ExportOnly:=(NOT Form2.Repo);
+      DisEnable(Sender,True);
     end;
-  finally
-    FPCupManager.ExportOnly:=(NOT Form2.Repo);
-    DisEnable(Sender,True);
+
   end;
+
 end;
 
 procedure TForm1.btnInstallDirSelectClick(Sender: TObject);
@@ -1748,32 +2133,22 @@ begin
   end;
 end;
 
-procedure TForm1.ButtonInstallCrossCompilerClick(Sender: TObject);
-begin
-  if Sender=ButtonInstallCrossCompiler then
-  begin
-    InstallCrossCompiler(Sender);
-  end;
-  if Sender=ButtonRemoveCrossCompiler then
-  begin
-    RemoveCrossCompiler(Sender);
-  end;
-end;
-
-function TForm1.InstallCrossCompiler(Sender: TObject):boolean;
+function TForm1.ButtonProcessCrossCompiler(Sender: TObject):boolean;
 var
   BinsFileName,LibsFileName,DownloadURL,TargetFile,TargetPath,BinPath,LibPath,UnZipper,s:string;
-  success,verbose:boolean;
+  warning,success,verbose:boolean;
   IncludeLCL,ZipFile:boolean;
   i:integer;
+  MajorVersion,MinorVersion:integer;
   aList: TStringList;
-  BaseBinsURL,BaseLibsURL:string;
+  BaseBinsURL:string;
+  BinsURL,LibsURL:string;
 begin
   result:=false;
 
   if (radgrpCPU.ItemIndex=-1) and (radgrpOS.ItemIndex=-1) then
   begin
-    ShowMessage('Please select a CPU and OS target first');
+    if Sender<>nil then ShowMessage('Please select a CPU and OS target first');
     exit;
   end;
 
@@ -1784,12 +2159,12 @@ begin
   if radgrpOS.ItemIndex<>-1 then
   begin
     s:=radgrpOS.Items[radgrpOS.ItemIndex];
-    if s='embedded' then
+    if s=GetOS(TOS.embedded) then
     begin
       if radgrpCPU.ItemIndex<>-1 then
       begin
         s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
-        if (s<>'avr') and (s<>'arm') and (s<>'mipsel') then
+        if (s<>GetCPU(TCPU.avr)) and (s<>GetCPU(TCPU.arm)) and (s<>'armv6') and (s<>GetCPU(TCPU.aarch64)) and (s<>GetCPU(TCPU.mipsel)) then
         begin
           success:=false;
         end;
@@ -1799,7 +2174,7 @@ begin
 
   if (NOT success) then
   begin
-    ShowMessage('No valid CPU target for embedded.');
+    if Sender<>nil then ShowMessage('No valid CPU target for embedded.');
     exit;
   end;
 
@@ -1807,12 +2182,56 @@ begin
   if radgrpOS.ItemIndex<>-1 then
   begin
     s:=radgrpOS.Items[radgrpOS.ItemIndex];
-    if s='android' then
+    if s=GetOS(TOS.freertos) then
+    begin
+      success:=false;
+      if radgrpCPU.ItemIndex<>-1 then
+      begin
+        s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+        if (s=GetCPU(TCPU.xtensa)) OR (s=GetCPU(TCPU.arm)) then
+          success:=true;
+      end;
+    end;
+  end;
+
+  if (NOT success) then
+  begin
+    if Sender<>nil then ShowMessage('No valid CPU target for FreeRTOS.');
+    exit;
+  end;
+
+  success:=true;
+  if radgrpOS.ItemIndex<>-1 then
+  begin
+    s:=radgrpOS.Items[radgrpOS.ItemIndex];
+    if s=GetOS(TOS.ultibo) then
+    begin
+      success:=false;
+      if radgrpCPU.ItemIndex<>-1 then
+      begin
+        s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+        if (s=GetCPU(TCPU.arm)) OR (s=GetCPU(TCPU.aarch64)) OR (s='armv6') then
+          success:=true;
+      end;
+    end;
+  end;
+
+  if (NOT success) then
+  begin
+    if Sender<>nil then ShowMessage('No valid CPU target for Ultibo.');
+    exit;
+  end;
+
+  success:=true;
+  if radgrpOS.ItemIndex<>-1 then
+  begin
+    s:=radgrpOS.Items[radgrpOS.ItemIndex];
+    if s=GetOS(TOS.android) then
     begin
       if radgrpCPU.ItemIndex<>-1 then
       begin
         s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
-        if (s<>'i386') and (s<>'arm') and (s<>'mipsel') and (s<>'jvm') and (s<>'aarch64') and (s<>'x8664') and (s<>'x86_64') then
+        if (s<>GetCPU(TCPU.i386)) and (s<>GetCPU(TCPU.arm)) and (s<>'armv6') and (s<>GetCPU(TCPU.mipsel)) and (s<>GetCPU(TCPU.jvm)) and (s<>GetCPU(TCPU.aarch64)) and (s<>'x8664') and (s<>GetCPU(TCPU.x86_64)) then
         begin
           success:=false;
         end;
@@ -1822,7 +2241,7 @@ begin
 
   if (NOT success) then
   begin
-    ShowMessage('No valid CPU target for android.');
+    if Sender<>nil then ShowMessage('No valid CPU target for android.');
     exit;
   end;
 
@@ -1832,87 +2251,166 @@ begin
     s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
     if s='jvm' then
     begin
+      success:=false;
       if radgrpOS.ItemIndex<>-1 then
       begin
         s:=radgrpOS.Items[radgrpOS.ItemIndex];
-        if (s<>'android') and (s<>'java') then
-        begin
-          success:=false;
-        end;
-      end else success:=false;
+        if (s=GetOS(TOS.android)) OR (s=GetOS(TOS.java)) then success:=true;
+      end;
     end;
   end;
 
   if (NOT success) then
   begin
-    ShowMessage('No valid OS target for jvm.');
+    if Sender<>nil then ShowMessage('No valid OS target for jvm.');
     exit;
   end;
+
+  success:=true;
+  if radgrpOS.ItemIndex<>-1 then
+  begin
+    s:=radgrpOS.Items[radgrpOS.ItemIndex];
+    if s='dragonfly' then
+    begin
+      success:=false;
+      if radgrpCPU.ItemIndex<>-1 then
+      begin
+        s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+        if (s=GetCPU(TCPU.x86_64)) then success:=true;
+      end;
+    end;
+  end;
+
+  if (NOT success) then
+  begin
+    if Sender<>nil then ShowMessage('No valid CPU target for dragonfly.');
+    exit;
+  end;
+
+  success:=true;
+  if radgrpCPU.ItemIndex<>-1 then
+  begin
+    s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+    if s='armv6' then
+    begin
+      success:=false;
+      if radgrpOS.ItemIndex<>-1 then
+      begin
+        s:=radgrpOS.Items[radgrpOS.ItemIndex];
+        if (s=GetOS(TOS.linux)) OR (s=GetOS(TOS.ultibo)) then success:=true;
+      end;
+    end;
+  end;
+
+  if (NOT success) then
+  begin
+    if Sender<>nil then ShowMessage('ARMV6 is [only available] for [RPi] Linux and Ultibo.');
+    exit;
+  end;
+
+  // OS=amiga) AND (CPU<>m68k))
+  // OS=morphos) AND (CPU<>powerpc))
 
   PrepareRun;
 
   if radgrpCPU.ItemIndex<>-1 then
   begin
     s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
-    if s='ppc' then s:='powerpc';
-    if s='ppc64' then s:='powerpc64';
-    if s='x8664' then s:='x86_64';
-    FPCupManager.CrossCPU_Target:=s;
+    FPCupManager.CrossCPU_Target:=GETTCPU(s);
   end;
 
   if radgrpOS.ItemIndex<>-1 then
   begin
     s:=radgrpOS.Items[radgrpOS.ItemIndex];
-    if s='i-sim' then s:='iphonesim';
+    if s='i-sim' then FPCupManager.CrossOS_Target:=TOS.iphonesim;
     if s='linux-musl' then
     begin
       FPCupManager.MUSL:=true;
-      s:='linux';
+      FPCupManager.CrossOS_Target:=TOS.linux;
     end;
-    FPCupManager.CrossOS_Target:=s;
+
+    if s='solaris-oi' then
+    begin
+      FPCupManager.SolarisOI:=true;
+      FPCupManager.CrossOS_Target:=TOS.solaris;
+    end;
+
+    //rename windows target os to the correct FPC target os
+    if s='windows' then
+    begin
+      if FPCupManager.CrossCPU_Target=TCPU.i386 then FPCupManager.CrossOS_Target:=TOS.win32;
+      if FPCupManager.CrossCPU_Target=TCPU.x86_64 then FPCupManager.CrossOS_Target:=TOS.win64;
+      if FPCupManager.CrossCPU_Target=TCPU.aarch64 then FPCupManager.CrossOS_Target:=TOS.win64;
+    end;
+
+    if FPCupManager.CrossOS_Target=TOS.osNone then FPCupManager.CrossOS_Target:=GetTOS(s);
   end;
 
-  {$if (defined(Linux)) AND (defined (CPUX86_64))}
+  {$ifdef Linux}
   if FPCupManager.MUSL then
   begin
-    if Sender<>nil then Application.MessageBox(PChar('On Linux x86_64, you cannot cross towards another Linux x86_64.'), PChar('FPC limitation'), MB_ICONERROR);
-    FPCupManager.CrossOS_Target:=''; // cleanup
-    FPCupManager.CrossCPU_Target:=''; // cleanup
-    exit;
+
+    {$ifdef CPUX86_64}
+    if FPCupManager.CrossCPU_Target=TCPU.x86_64 then
+    begin
+      if Sender<>nil then Application.MessageBox(PChar('On Linux x86_64, you cannot cross towards another Linux x86_64.'), PChar('FPC limitation'), MB_ICONERROR);
+      FPCupManager.CrossOS_Target:=TOS.osNone; // cleanup
+      FPCupManager.CrossCPU_Target:=TCPU.cpuNone; // cleanup
+      exit;
+    end;
+    {$endif}
+
+    {$ifdef CPUAARCH64}
+    if FPCupManager.CrossCPU_Target=TCPU.aarch64 then
+    begin
+      if Sender<>nil then Application.MessageBox(PChar('On Linux aarch64, you cannot cross towards another Linux aarch64.'), PChar('FPC limitation'), MB_ICONERROR);
+      FPCupManager.CrossOS_Target:=TOS.osNone; // cleanup
+      FPCupManager.CrossCPU_Target:=TCPU.cpuNone; // cleanup
+      exit;
+    end;
+    {$endif}
+
+
+    {$ifdef CPUX86}
+    if FPCupManager.CrossCPU_Target=TCPU.i386 then
+    begin
+      if Sender<>nil then Application.MessageBox(PChar('On Linux i386, you cannot cross towards another Linux i386.'), PChar('FPC limitation'), MB_ICONERROR);
+      FPCupManager.CrossOS_Target:=TOS.osNone; // cleanup
+      FPCupManager.CrossCPU_Target:=TCPU.cpuNone; // cleanup
+      exit;
+    end;
+    {$endif}
+
   end;
   {$endif}
 
-  if (FPCupManager.CrossOS_Target='java') then FPCupManager.CrossCPU_Target:='jvm';
-  if (FPCupManager.CrossOS_Target='msdos') then FPCupManager.CrossCPU_Target:='i8086';
+  if (FPCupManager.CrossOS_Target=TOS.java) then FPCupManager.CrossCPU_Target:=TCPU.jvm;
+  if (FPCupManager.CrossOS_Target=TOS.msdos) then FPCupManager.CrossCPU_Target:=TCPU.i8086;
   //For i8086 embedded and win16 are also ok, but not [yet] implemented by fpcupdeluxe
-  if (FPCupManager.CrossCPU_Target='i8086') then FPCupManager.CrossOS_Target:='msdos';
-  if (FPCupManager.CrossOS_Target='go32v2') then FPCupManager.CrossCPU_Target:='i386';
+  if (FPCupManager.CrossCPU_Target=TCPU.i8086) then FPCupManager.CrossOS_Target:=TOS.msdos;
+  if (FPCupManager.CrossOS_Target=TOS.go32v2) then FPCupManager.CrossCPU_Target:=TCPU.i386;
+  if (FPCupManager.CrossOS_Target=TOS.dragonfly) then FPCupManager.CrossCPU_Target:=TCPU.x86_64;
 
-  if FPCupManager.CrossOS_Target='windows' then
-  begin
-    if FPCupManager.CrossCPU_Target='i386' then FPCupManager.CrossOS_Target:='win32';
-    if FPCupManager.CrossCPU_Target='x86_64' then FPCupManager.CrossOS_Target:='win64';
-  end;
-
-  if (FPCupManager.CrossCPU_Target='') then
+  if (FPCupManager.CrossCPU_Target=TCPU.cpuNone) then
   begin
     if Sender<>nil then Application.MessageBox(PChar('Please select a CPU target first.'), PChar('CPU error'), MB_ICONERROR);
-    FPCupManager.CrossOS_Target:=''; // cleanup
     exit;
   end;
 
-  if (FPCupManager.CrossOS_Target='') then
+  if (FPCupManager.CrossOS_Target=TOS.osNone) then
   begin
     if Sender<>nil then Application.MessageBox(PChar('Please select an OS target first.'), PChar('OS error'), MB_ICONERROR);
-    FPCupManager.CrossCPU_Target:=''; // cleanup
     exit;
   end;
 
   if (NOT FPCupManager.CheckValidCPUOS) then
   begin
-    memoSummary.Lines.Append('');
-    memoSummary.Lines.Append('FPC source (fpmkunit.pp): No valid CPU / OS target.');
-    memoSummary.Lines.Append('Cross-building will continue, but with great changes of errors !!');
+    if (NOT (FPCupManager.CrossOS_Target in [TOS.freertos,TOS.ultibo])) then
+    begin
+      memoSummary.Lines.Append('');
+      memoSummary.Lines.Append('FPC source (fpmkunit.pp): No valid CPU / OS target.');
+      memoSummary.Lines.Append('Cross-building will continue, but with great changes of errors !!');
+    end;
   end;
 
   if assigned(CrossInstallers) then
@@ -1920,7 +2418,7 @@ begin
     success:=false;
     for i := 0 to CrossInstallers.Count - 1 do
     begin
-      success:=(CrossInstallers[i] = GetFPCTargetCPUOS(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,false));
+      success:=( (TCrossInstaller(CrossInstallers.Objects[i]).TargetCPU=FPCupManager.CrossCPU_Target) AND (TCrossInstaller(CrossInstallers.Objects[i]).TargetOS=FPCupManager.CrossOS_Target) );
       if success then break;
     end;
     if (NOT success) then
@@ -1935,935 +2433,1170 @@ begin
         memoSummary.Lines.Append('FPCUPDELUXE Limitation: No valid CPU / OS crosscompiler found. Skipping');
         memoSummary.Lines.Append('FPCUPDELUXE Limitation: You could do a feature request !');
       end;
-      FPCupManager.CrossOS_Target:=''; // cleanup
-      FPCupManager.CrossCPU_Target:=''; // cleanup
+      FPCupManager.CrossOS_Target:=TOS.osNone; // cleanup
+      FPCupManager.CrossCPU_Target:=TCPU.cpuNone; // cleanup
       exit;
     end;
   end;
 
-  if Sender<>nil then
+  // Set subarch early
+  FPCupManager.CrossOS_SubArch:=SubarchForm.GetSelectedSubArch(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
+
+  {$ifdef RemoteLog}
+  aDataClient.UpInfo.CrossCPUOS:=GetOS(FPCupManager.CrossOS_Target)+'-'+GetCPU(FPCupManager.CrossCPU_Target);
+  {$endif}
+
+  if Sender=ButtonRemoveCrossCompiler then
   begin
-    {$ifdef Linux}
-    if (FPCupManager.CrossOS_Target='darwin') then
+    s:='Going to remove the cross-compiler for ['+GetCPU(FPCupManager.CrossCPU_Target)+'-'+GetOS(FPCupManager.CrossOS_Target)+'].' + sLineBreak +
+       'Do you want to continue ?';
+    if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
     begin
-      success:=CheckExecutable('clang', '-v', '');
-      if (NOT success) then
-      begin
-        s:=
-        'Clang cannot be found !!'+ sLineBreak +
-        'Clang need to be installed to be able to cross-compile towards Darwin !'+ sLineBreak +
-        'Install clang and retry !!';
-        Application.MessageBox(PChar(s), PChar('Missing clang'), MB_ICONERROR);
-        memoSummary.Lines.Append('');
-        memoSummary.Lines.Append('To get clang: sudo apt-get install clang');
-        exit;
-      end;
+      exit;
     end;
-    if (FPCupManager.CrossOS_Target='wince') then
-    begin
-      (*
-      success:=CheckExecutable('gcc', '-v', '');
-      if (NOT success) then
+
+    DisEnable(Sender,False);
+    try
+      if ((FPCupManager.CrossOS_Target=TOS.java) OR
+          (FPCupManager.CrossOS_Target=TOS.android) OR
+          (FPCupManager.CrossOS_Target=TOS.ios) OR
+          (FPCupManager.CrossOS_Target in SUBARCH_OS)) then
       begin
-        s:=
-        'Gcc cannot be found !!'+ sLineBreak +
-        'Gcc need to be installed to be able to cross-compile towards wince !'+ sLineBreak +
-        'Install gcc and retry !!';
-        Application.MessageBox(PChar(s), PChar('Missing gcc'), MB_ICONERROR);
-        memoSummary.Lines.Append('');
-        memoSummary.Lines.Append('To get gcc: sudo apt-get install gcc');
-        //memoSummary.Lines.Append('Cross-building will continue, but with great changes of winres errors !!');
-        exit;
+        FPCupManager.OnlyModules:=_FPCREMOVEONLY;
+      end
+      else
+      begin
+        FPCupManager.OnlyModules:=_LCLALLREMOVEONLY+','+_FPCREMOVEONLY;
       end;
-      *)
-      (*
-      {$ifdef CPU64}
-      if (NOT FileExists('/lib/ld-linux-x86-64.so.2')) then
+
+      {$ifdef RemoteLog}
+      aDataClient.UpInfo.UpFunction:=ufUninstallCross;
+      {$endif}
+      success:=RealRun;
+      if success then
+        Form2.SetCrossAvailable(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch,false);
+    finally
+      DisEnable(Sender,true);
+    end;
+  end
+  else
+  begin
+    if Sender<>nil then
+    begin
+      {$if (defined(UNIX)) and (not defined(Darwin))}
+      if (FPCupManager.CrossOS_Target=TOS.darwin) OR ( (FPCupManager.CrossOS_Target=TOS.win64) AND (FPCupManager.CrossCPU_Target=TCPU.aarch64) ) then
       begin
-        s:=
-        'The current wince binutils need /lib/ld-linux-x86-64.so.2 !' + sLineBreak +
-        'If so, add this symlink and point it towards /lib/x86_64-linux-gnu/ld-2.24.so' + sLineBreak +
-        'sudo ln -s /lib/x86_64-linux-gnu/ld-2.24.so /lib/ld-linux-x86-64.so.2';
-        Application.MessageBox(PChar(s), PChar('Dynamic linker/loader'), MB_ICONWARNING);
-        memoSummary.Lines.Append('');
-        memoSummary.Lines.Append(s);
+        success:=false;
+        s:=Which('clang');
+        if FileExists(s) then success:=CheckExecutable(s, ['-v'], '');
+        if (NOT success) then
+        begin
+          s:=
+          'Clang cannot be found !!'+ sLineBreak +
+          'Clang need to be installed to be able to cross-compile towards '+GetOS(FPCupManager.CrossOS_Target)+' !'+ sLineBreak +
+          'Install clang and retry !!';
+          Application.MessageBox(PChar(s), PChar('Missing clang'), MB_ICONERROR);
+          memoSummary.Lines.Append('');
+          memoSummary.Lines.Append('To get clang: sudo apt-get install clang');
+          exit;
+        end;
+      end;
+      if (FPCupManager.CrossOS_Target=TOS.wince) then
+      begin
+        (*
+        success:=CheckExecutable('gcc', '-v', '');
+        if (NOT success) then
+        begin
+          s:=
+          'Gcc cannot be found !!'+ sLineBreak +
+          'Gcc need to be installed to be able to cross-compile towards wince !'+ sLineBreak +
+          'Install gcc and retry !!';
+          Application.MessageBox(PChar(s), PChar('Missing gcc'), MB_ICONERROR);
+          memoSummary.Lines.Append('');
+          memoSummary.Lines.Append('To get gcc: sudo apt-get install gcc');
+          //memoSummary.Lines.Append('Cross-building will continue, but with great changes of winres errors !!');
+          exit;
+        end;
+        *)
+        (*
+        {$ifdef CPU64}
+        if (NOT FileExists('/lib/ld-linux-x86-64.so.2')) then
+        begin
+          s:=
+          'The current wince binutils need /lib/ld-linux-x86-64.so.2 !' + sLineBreak +
+          'If so, add this symlink and point it towards /lib/x86_64-linux-gnu/ld-2.24.so' + sLineBreak +
+          'sudo ln -s /lib/x86_64-linux-gnu/ld-2.24.so /lib/ld-linux-x86-64.so.2';
+          Application.MessageBox(PChar(s), PChar('Dynamic linker/loader'), MB_ICONWARNING);
+          memoSummary.Lines.Append('');
+          memoSummary.Lines.Append(s);
+        end;
+        {$endif}
+        *)
       end;
       {$endif}
-      *)
-    end;
-    {$endif}
 
-    if (FPCupManager.CrossOS_Target='java') then
-    begin
-      success:=CheckJava;
-      if (NOT success) then
+      if (FPCupManager.CrossOS_Target=TOS.java) then
       begin
-        s:=
-        'Java cannot be found !!'+ sLineBreak +
-        'Java need to be installed to be able to cross-compile towards java !'+ sLineBreak +
-        'Install java and retry !!';
-        Application.MessageBox(PChar(s), PChar('Missing java'), MB_ICONERROR);
-        {$ifdef Linux}
-        memoSummary.Lines.Append('');
-        memoSummary.Lines.Append('To get java: sudo apt-get install default-jre');
-        {$endif}
-        exit;
+        success:=CheckJava;
+        if (NOT success) then
+        begin
+          s:=
+          'Java cannot be found !!'+ sLineBreak +
+          'Java need to be installed to be able to cross-compile towards java !'+ sLineBreak +
+          'Install java and retry !!';
+          Application.MessageBox(PChar(s), PChar('Missing java'), MB_ICONERROR);
+          {$ifdef Linux}
+          memoSummary.Lines.Append('');
+          memoSummary.Lines.Append('To get java: sudo apt-get install default-jre');
+          {$endif}
+          exit;
+        end;
       end;
-    end;
 
-    {$ifndef BSD}
-    if (Pos('bsd',FPCupManager.CrossOS_Target)>0) then
-    //if (FPCupManager.CrossOS_Target='freebsd') OR (FPCupManager.CrossOS_Target='netbsd') OR (FPCupManager.CrossOS_Target='openbsd') then
-    begin
-      if (MessageDlg('Be forwarned: this will only work with FPC>=3.0.2 (trunk, NewPascal, fixes, stable).' + sLineBreak +
-                 'See: http://bugs.freepascal.org/view.php?id=30908' + sLineBreak +
-                 'Do you want to continue ?'
-                 ,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
-                 begin
-                   memoSummary.Lines.Append('See: http://bugs.freepascal.org/view.php?id=30908');
-                   exit;
-                 end;
-    end;
-    {$endif}
+      s:='';
+      if (FPCupManager.CrossOS_Target=TOS.aix)
+      then
+      begin
+        s:='Be forwarned: this will only work with FPC 3.0 and later.' + sLineBreak +
+           'Do you want to continue ?';
+      end;
+      if (FPCupManager.CrossCPU_Target=TCPU.aarch64)
+      {$ifdef MSWINDOWS}OR (FPCupManager.CrossOS_Target=TOS.darwin){$endif}
+      OR (FPCupManager.CrossOS_Target=TOS.msdos)
+      OR (FPCupManager.CrossOS_Target=TOS.haiku)
+      then
+      begin
+        s:='Be forwarned: this will only work with FPC [(>= 3.2) OR (embedded) OR (trunk)].' + sLineBreak +
+           'Do you want to continue ?';
+      end;
 
-    s:='';
-    if (FPCupManager.CrossOS_Target='aix')
-    then
-    begin
-      s:='Be forwarned: this will only work with FPC 3.0 and later.' + sLineBreak +
-         'Do you want to continue ?';
-    end;
-    if (FPCupManager.CrossCPU_Target='aarch64')
-    {$ifdef MSWINDOWS}OR (FPCupManager.CrossOS_Target='darwin'){$endif}
-    OR (FPCupManager.CrossOS_Target='msdos')
-    OR (FPCupManager.CrossOS_Target='haiku')
-    then
-    begin
-      s:='Be forwarned: this will only work with FPC 3.2 / embedded / trunk / NewPascal.' + sLineBreak +
-         'Do you want to continue ?';
-    end;
-    if ((FPCupManager.CrossCPU_Target='aarch64') {OR (FPCupManager.CrossCPU_Target='i386')} OR (FPCupManager.CrossCPU_Target='x86_64')) AND (FPCupManager.CrossOS_Target='android')
-    then
-    begin
-      s:='Be forwarned: this will only work with trunk.' + sLineBreak +
-         'Do you want to continue ?';
-    end;
+      warning:=false;
+      if (((FPCupManager.CrossCPU_Target=TCPU.aarch64) {OR (FPCupManager.CrossCPU_Target=TCPU.i386)} OR (FPCupManager.CrossCPU_Target=TCPU.x86_64)) AND (FPCupManager.CrossOS_Target=TOS.android))
+        then warning:=true;
+      if (((FPCupManager.CrossCPU_Target=TCPU.aarch64) OR (FPCupManager.CrossCPU_Target=TCPU.arm)) AND (FPCupManager.CrossOS_Target=TOS.ios))
+        then warning:=true;
 
-    {$ifdef Linux}
-    if ((FPCupManager.CrossCPU_Target='mips') OR (FPCupManager.CrossCPU_Target='mipsel'))
-    then
-    begin
-      s:='You could get the native cross-utilities first (advised).' + sLineBreak +
-         'E.g.: sudo apt-get install libc6-mips-cross binutils-mips-linux-gnu' + sLineBreak +
-         'Do you want to continue ?';
-    end;
-    {$endif}
+      if warning then
+      begin
+        s:='Be forwarned: this will only work with FPC [(>= 3.3) OR (embedded) OR (trunk)].' + sLineBreak +
+           'Do you want to continue ?';
+      end;
 
-    if length(s)>0 then
-    begin
+      {$ifdef Linux}
+      if ((FPCupManager.CrossCPU_Target=TCPU.mips) OR (FPCupManager.CrossCPU_Target=TCPU.mipsel))
+      then
+      begin
+        s:='You could get the native cross-utilities first (advised).' + sLineBreak +
+           'E.g.: sudo apt-get install libc6-mips-cross binutils-mips-linux-gnu' + sLineBreak +
+           'Do you want to continue ?';
+      end;
+      {$endif}
+
+      if (length(s)=0) then
+        s:='Do you want to continue ?';
+      s:='Going to install the cross-compiler for' + sLineBreak + '['+FPCupManager.CrossCombo_Target+']' + sLineBreak + s;
       if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
       begin
         exit;
       end;
     end;
-  end;
 
-  DisEnable(Sender,False);
+    DisEnable(Sender,False);
 
-  try
-
-    //arm predefined settings
-    if (FPCupManager.CrossCPU_Target='arm') AND (FPCupManager.CrossOS_Target<>'embedded') then
-    begin
-      // default: armhf
-      // don't worry: this -dFPC_ARMHF option will still build a normal ppcrossarm for all targets
-      // adding this option will allow ppcrossarm compiler to generate ARMHF for Linux
-      // but I stand corrected if this assumption is wrong
-      s:=Form2.GetCrossARMFPCStr(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
-      if Length(s)=0 then
-        FPCupManager.FPCOPT:='-dFPC_ARMHF '
-      else
-        FPCupManager.FPCOPT:=s+' ';
-
-      if (FPCupManager.CrossOS_Target='wince') then
+    try
+      //embedded predefined settings
+      if (FPCupManager.CrossOS_Target=TOS.embedded) then
       begin
-        //Disable for now : setting ARMV6 or higher gives problems with FPC 3.0.4 and lower
-        //FPCupManager.CrossOPT:='-CpARMV6 ';
-      end
-      else
-      if (FPCupManager.CrossOS_Target='darwin') then
+        if FPCupManager.CrossOS_SubArch=TSUBARCH.saNone then
+        begin
+          if (FPCupManager.CrossCPU_Target=TCPU.avr) then
+            FPCupManager.CrossOS_SubArch:=TSubarch.avr5;
+          if (FPCupManager.CrossCPU_Target=TCPU.arm) then
+            FPCupManager.CrossOS_SubArch:=TSubarch.armv6m;
+          if (FPCupManager.CrossCPU_Target=TCPU.mipsel) then
+            FPCupManager.CrossOS_SubArch:=TSubarch.pic32mx;
+        end;
+      end;
+
+      //freertos predefined settings
+      if (FPCupManager.CrossOS_Target=TOS.freertos) then
       begin
-        FPCupManager.CrossOPT:='-CpARMV7 -CfVFPV3 ';
-      end
-      else
+        if FPCupManager.CrossOS_SubArch=TSUBARCH.saNone then
+        begin
+          if (FPCupManager.CrossCPU_Target=TCPU.xtensa) then
+            FPCupManager.CrossOS_SubArch:=TSubarch.lx6;
+          if (radgrpCPU.Items[radgrpCPU.ItemIndex]='armv6') then
+            FPCupManager.CrossOS_SubArch:=TSubarch.armv6m;
+          if (FPCupManager.CrossCPU_Target=TCPU.arm) then
+            FPCupManager.CrossOS_SubArch:=TSubarch.armv7em;
+        end;
+      end;
+
+      //ultibo predefined settings
+      if (FPCupManager.CrossOS_Target=TOS.ultibo) then
       begin
-        // Use hard floats, using armeabi-v7a Android ABI.
-        // Note: do not use -CaEABIHF on Android, to not use
-        // armeabi-v7a-hard ABI. Reasons:
-        // - armeabi-v7a-hard ABI is not adviced anymore by Google,
-        //   see "ARM Hard Float ABI Removal" on
-        //   https://android.googlesource.com/platform/ndk/+/353e653824b79c43b948429870d0abeedebde386/docs/HardFloatAbi.md
-        // - it prevents calling functions from libraries not using
-        //   armeabi-v7a-hard ABI (but only using armeabi-v7a) like
-        //   http://repo.or.cz/openal-soft/android.git or
-        //   https://github.com/michaliskambi/tremolo-android .
-        if (FPCupManager.CrossOS_Target='android')
-            then FPCupManager.CrossOPT:='-Cp'+DEFAULTARMCPU+' -CfVFPV3 '
+        if (FPCupManager.CrossCPU_Target=TCPU.arm) then
+        begin
+          if FPCupManager.CrossOS_SubArch=TSUBARCH.saNone then
+          begin
+            if (radgrpCPU.Items[radgrpCPU.ItemIndex]='armv6') then
+              FPCupManager.CrossOS_SubArch:=TSubarch.armv6
             else
-            begin
-              if Pos('-dFPC_ARMHF',FPCupManager.FPCOPT)>0 then
-                FPCupManager.CrossOPT:='-Cp'+DEFAULTARMCPU+' -CfVFPV3 -OoFASTMATH -CaEABIHF '
-              else
-                FPCupManager.CrossOPT:='-Cp'+DEFAULTARMCPU+' -CfVFPV3 -OoFASTMATH ';
-            end;
+              FPCupManager.CrossOS_SubArch:=TSubarch.armv7a;
+          end;
+        end;
       end;
-    end;
 
-    //embedded predefined settings
-    if (FPCupManager.CrossOS_Target='embedded') then
-    begin
-      if (FPCupManager.CrossCPU_Target='avr') then
+      // Set FPC options
+      FPCupManager.FPCOPT:=Form2.FPCOptions;
+      if (FPCupManager.CrossCPU_Target=TCPU.arm) then
       begin
-        FPCupManager.FPCOPT:='-O2 ';
-        // for Uno (ATMega328P) use avr5
-        // for Mega (ATMega2560) use avr6
-        FPCupManager.CrossOPT:='-Cpavr5 ';
-        FPCupManager.CrossOS_SubArch:='avr5';
+        if (Length(FPCupManager.FPCOPT)=0) then
+        begin
+          // Set arm abi build option
+          FPCupManager.FPCOPT:=Form2.GetCrossARMFPCStr(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch);
+        end;
+
+        // Set ABI option
+        //FPCupManager.CrossOS_ABI:=TABI.abiNone;
+
+
       end;
-      if (FPCupManager.CrossCPU_Target='arm') then
+
+      // Set FPC cross-compile options
+      FPCupManager.CrossOPT:=Form2.GetCrossBuildOptions(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch);
+
+      // use the available source to build the cross-compiler ... change nothing about source and url !!
+      FPCupManager.OnlyModules:=_FPCCLEANBUILDONLY;//'FPCCleanOnly,FPCBuildOnly';
+      //FPCupManager.OnlyModules:=_FPC+_BUILD+_ONLY;
+
+      // handle inclusion of LCL when cross-compiling
+      IncludeLCL:=Form2.IncludeLCL;
+      if (FPCupManager.CrossOS_Target=TOS.java) then IncludeLCL:=false;
+      if (FPCupManager.CrossOS_Target=TOS.android) then IncludeLCL:=false;
+      if (FPCupManager.CrossOS_Target=TOS.ios) then IncludeLCL:=false;
+      if (FPCupManager.CrossOS_Target=TOS.embedded) then IncludeLCL:=false;
+      if (FPCupManager.CrossOS_Target=TOS.freertos) then IncludeLCL:=false;
+
+      if IncludeLCL then
       begin
-        s:=Form2.GetCrossARMFPCStr(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
-        if Length(s)=0 then
-          FPCupManager.FPCOPT:='-dFPC_ARMHF '
+        FPCupManager.OnlyModules:=FPCupManager.OnlyModules+','+_LCL;
+        if ((FPCupManager.CrossOS_Target=TOS.win32) OR (FPCupManager.CrossOS_Target=TOS.win64)) then
+           FPCupManager.LCL_Platform:='win32'
         else
-          FPCupManager.FPCOPT:=s+' ';
-
-        FPCupManager.CrossOS_SubArch:='armv6m';
-      end;
-      if (FPCupManager.CrossCPU_Target='mipsel') then
+        if (FPCupManager.CrossOS_Target=TOS.wince) then
+           FPCupManager.LCL_Platform:='wince'
+        else
+        if (FPCupManager.CrossOS_Target=TOS.darwin) then
+        begin
+          FPCupManager.LCL_Platform:='cocoa';
+          {$ifdef LCLQT5}
+          FPCupManager.LCL_Platform:='qt5';
+          {$endif}
+          {$ifdef LCLCARBON}
+          FPCupManager.LCL_Platform:='carbon';
+          {$endif}
+        end
+        else
+        if ((FPCupManager.CrossOS_Target=TOS.amiga) OR (FPCupManager.CrossOS_Target=TOS.aros) OR (FPCupManager.CrossOS_Target=TOS.morphos)) then
+           FPCupManager.LCL_Platform:='mui'
+        else
+        begin
+          if (FPCupManager.CrossOS_Target<>TOS.osNone) AND (FPCupManager.CrossCPU_Target<>TCPU.cpuNone) then
+            FPCupManager.LCL_Platform:='gtk2';
+        end;
+      end
+      else
       begin
-        FPCupManager.CrossOPT:='-Cpmips32 ';
-        FPCupManager.CrossOS_SubArch:='pic32mx';
+        if Form2.IncludeLCL then AddMessage('Skipping build of LCL for this target: not supported (yet).');
       end;
-    end;
 
-    //msdos predefined settings
-    if (FPCupManager.CrossOS_Target='msdos') then
-    begin
-      if (FPCupManager.CrossCPU_Target='i8086') then
-      begin
-        {$IFDEF DARWIN}
-        FPCupManager.CrossOPT:='-WmLarge ';
-        {$ELSE}
-        FPCupManager.CrossOPT:='-WmMedium ';
-        {$ENDIF DARWIN}
-      end;
-    end;
+      //For testing only !!
+      //FPCupManager.OnlyModules:='LCL';
 
-    //ppc64 predefined settings
-    if (FPCupManager.CrossCPU_Target='powerpc64') then
-    begin
-      if ((FPCupManager.CrossOS_Target='linux')) then
-      begin
-        // for now, little endian only on Linux (IBM CPU's) !!
-        FPCupManager.CrossOPT:='-Cb- -Caelfv2 ';
-      end;
-    end;
-
-    // recheck / override / set custom FPC options by special user input through setup+
-    s:=Form2.FPCOptions;
-    s:=Trim(s);
-    if Length(s)>0 then
-    begin
-      FPCupManager.FPCOPT:=s+' ';
-    end;
-
-    // override / set custom FPC crossoptions by special user input through setup+
-    s:=Form2.GetCrossBuildOptions(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
-    s:=Trim(s);
-    if Length(s)>0 then FPCupManager.CrossOPT:=s+' ';
-
-    // override / set custom FPC cross-subarch by special user input through setup+
-    if (FPCupManager.CrossOS_Target='embedded') then
-    begin
-      s:=Form2.GetCrossSubArch(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
+      s:=Form2.GetLibraryDirectory(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch);
       s:=Trim(s);
-      if Length(s)>0 then FPCupManager.CrossOS_SubArch:=s;
-
-      //present list of valid subarch targets, just to infrm the user.
-      try
-        aList:=FPCupManager.ParseSubArchsFromSource;
-        if (aList.Count > 0) then
+      if Length(s)>0 then
+      begin
+        if DirectoryExists(s) then
+          FPCupManager.CrossLibraryDirectory:=s
+        else
         begin
-          s:='';
-          for i:=0 to (aList.Count-1) do
-          begin
-            if aList.Names[i]=FPCupManager.CrossCPU_Target then s:=s+aList.ValueFromIndex[i]+', ';
-          end;
-          if Length(s)>0 then
-          begin
-            Delete(s,Length(s)-1,2);
-            memoSummary.Lines.Append('Valid subarch(s) for '+FPCupManager.CrossCPU_Target+' embedded are: '+s);
-          end;
+          AddMessage('Cross libraries not found at supplied location.');
+          AddMessage('Libs location: '+s);
+          AddMessage('Expect failures.');
         end;
-      finally
-        aList.Free;
       end;
-    end;
+      s:=Form2.GetToolsDirectory(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch);
+      s:=Trim(s);
+      if Length(s)>0 then
+      begin
+        if DirectoryExists(s) then
+          FPCupManager.CrossToolsDirectory:=s
+        else
+        begin
+          AddMessage('Cross tools not found at supplied location.');
+          AddMessage('Tools location: '+s);
+          AddMessage('Expect failures.');
+        end;
+      end;
 
-    // use the available source to build the cross-compiler ... change nothing about source and url !!
-    FPCupManager.OnlyModules:=_FPCCLEANBUILDONLY;//'FPCCleanOnly,FPCBuildOnly';
+      AddMessage(upBuildCrossCompiler);
 
-    // handle inclusion of LCL when cross-compiling
-    IncludeLCL:=Form2.IncludeLCL;
-    if (FPCupManager.CrossOS_Target='java') then IncludeLCL:=false;
-    if (FPCupManager.CrossOS_Target='android') then IncludeLCL:=false;
-    if (FPCupManager.CrossOS_Target='embedded') then IncludeLCL:=false;
-    // AFAIK, on Darwin, LCL Carbon and Cocoa are only for MACOSX
-    if (FPCupManager.CrossOS_Target='darwin') AND ((FPCupManager.CrossCPU_Target='arm') OR (FPCupManager.CrossCPU_Target='aarch64')) then IncludeLCL:=false;
-    if IncludeLCL then
-    begin
-      FPCupManager.OnlyModules:=FPCupManager.OnlyModules+',LCL';
-      if ((FPCupManager.CrossOS_Target='win32') OR (FPCupManager.CrossOS_Target='win64')) then
-         FPCupManager.CrossLCL_Platform:='win32' else
-      if (FPCupManager.CrossOS_Target='wince') then
-         FPCupManager.CrossLCL_Platform:='wince' else
-      if (FPCupManager.CrossOS_Target='darwin') then
-         FPCupManager.CrossLCL_Platform:='carbon' else
-      if ((FPCupManager.CrossOS_Target='amiga') OR (FPCupManager.CrossOS_Target='aros') OR (FPCupManager.CrossOS_Target='morphos')) then
-         FPCupManager.CrossLCL_Platform:='mui' else
-      FPCupManager.CrossLCL_Platform:='gtk2';
-      // if Darwin cpu64, only cocoa (but also qt5) will work.
-      if ((FPCupManager.CrossOS_Target='darwin') AND ((FPCupManager.CrossCPU_Target='x86_64') OR (FPCupManager.CrossCPU_Target='powerpc64')))
-      {$ifdef LCLQT5}
-      then FPCupManager.CrossLCL_Platform:='qt5';
-      {$else}
-      then FPCupManager.CrossLCL_Platform:='cocoa';
-      {$endif}
-    end
-    else
-    begin
-      if Form2.IncludeLCL then AddMessage('Skipping build of LCL for this target: not supported (yet).');
-    end;
+      s:='Fpcupdeluxe: FPC cross-builder: Building compiler for '+GetOS(FPCupManager.CrossOS_Target);
+      if FPCupManager.MUSL then s:=s+'-musl';
+      if FPCupManager.SolarisOI then s:=s+'-openindiana';
+      s:=s+'-'+GetCPU(FPCupManager.CrossCPU_Target);
+      sStatus:=s;
 
-    s:=Form2.GetLibraryDirectory(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
-    s:=Trim(s);
-    if Length(s)>0 then FPCupManager.CrossLibraryDirectory:=s;
-    s:=Form2.GetToolsDirectory(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
-    s:=Trim(s);
-    if Length(s)>0 then FPCupManager.CrossToolsDirectory:=s;
+      if FPCupManager.FPCOPT<>'' then
+      begin
+        sStatus:=sStatus+' (OPT: '+FPCupManager.FPCOPT+')';
+        {$ifdef RemoteLog}
+        aDataClient.AddExtraData('OPT',FPCupManager.FPCOPT);
+        {$endif}
+      end;
+      if FPCupManager.CrossOPT<>'' then
+      begin
+        sStatus:=sStatus+' [CROSSOPT: '+FPCupManager.CrossOPT+']';
+        {$ifdef RemoteLog}
+        aDataClient.AddExtraData('CROSSOPT',FPCupManager.CrossOPT);
+        {$endif}
+      end;
+      if FPCupManager.CrossOS_SubArch<>TSubarch.saNone then
+      begin
+        sStatus:=sStatus+' {SUBARCH: '+GetSubarch(FPCupManager.CrossOS_SubArch)+'}';
+        {$ifdef RemoteLog}
+        aDataClient.AddExtraData('SUBARCH',GetSubarch(FPCupManager.CrossOS_SubArch));
+        {$endif}
+      end;
+      sStatus:=sStatus+'.';
 
-    AddMessage(upBuildCrossCompiler);
+      AddMessage(sStatus);
+      memoSummary.Lines.Append(sStatus);
 
-    sStatus:='Fpcupdeluxe: FPC cross-builder: Building compiler for '+FPCupManager.CrossOS_Target+'-'+FPCupManager.CrossCPU_Target;
-    if FPCupManager.FPCOPT<>'' then
-    begin
-      sStatus:=sStatus+' (OPT: '+FPCupManager.FPCOPT+')';
       {$ifdef RemoteLog}
-      aDataClient.AddExtraData('OPT',FPCupManager.FPCOPT);
+      aDataClient.UpInfo.UpFunction:=ufInstallCross;
+      if length(FPCupManager.LCL_Platform)>0 then aDataClient.AddExtraData('LCL',FPCupManager.LCL_Platform);
+      if length(FPCupManager.OnlyModules)>0 then aDataClient.AddExtraData('Only',FPCupManager.OnlyModules);
+      if length(FPCupManager.SkipModules)>0 then aDataClient.AddExtraData('Skip',FPCupManager.SkipModules);
       {$endif}
-    end;
-    if FPCupManager.CrossOPT<>'' then
-    begin
-      sStatus:=sStatus+' [CROSSOPT: '+FPCupManager.CrossOPT+']';
-      {$ifdef RemoteLog}
-      aDataClient.AddExtraData('CROSSOPT',FPCupManager.CrossOPT);
-      {$endif}
-    end;
-    if FPCupManager.CrossOS_SubArch<>'' then
-    begin
-      sStatus:=sStatus+' {SUBARCH: '+FPCupManager.CrossOS_SubArch+'}';
-      {$ifdef RemoteLog}
-      aDataClient.AddExtraData('SUBARCH',FPCupManager.CrossOS_SubArch);
-      {$endif}
-    end;
-    sStatus:=sStatus+'.';
 
-    AddMessage(sStatus);
-    memoSummary.Lines.Append(sStatus);
+      success:=RealRun;
 
-    {$ifdef RemoteLog}
-    aDataClient.UpInfo.UpFunction:=ufInstallCross;
-    aDataClient.UpInfo.CrossCPUOS:=FPCupManager.CrossOS_Target+'-'+FPCupManager.CrossCPU_Target;
-    if length(FPCupManager.CrossLCL_Platform)>0 then aDataClient.AddExtraData('CrossLCL',FPCupManager.CrossLCL_Platform);
-    if length(FPCupManager.OnlyModules)>0 then aDataClient.AddExtraData('Only',FPCupManager.OnlyModules);
-    if length(FPCupManager.SkipModules)>0 then aDataClient.AddExtraData('Skip',FPCupManager.SkipModules);
-    {$endif}
-
-    success:=RealRun;
-
-    if {(Sender<>nil) AND} (NOT success) then
-    begin
-
-      // perhaps there were no libraries and/or binutils ... download them (if available) from fpcup on GitHub
-
-      if MissingCrossBins OR MissingCrossLibs then
+      if {(Sender<>nil) AND} (NOT success) then
       begin
 
-        if (Sender<>nil) then
+        // perhaps there were no libraries and/or binutils ... download them (if available) from fpcup on GitHub
+
+        if MissingCrossBins OR MissingCrossLibs then
         begin
-          if (MessageDlg('The building of a crosscompiler failed due to missing cross-tools.' + sLineBreak +
-                   'Fpcupdeluxe can try to download them if available !' + sLineBreak +
-                   'Do you want to continue ?'
-                   ,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
-                   begin
-                     exit;
-                   end;
-        end;
 
-        BinsFileName:='';
-
-        if ((Sender<>nil) AND (CheckAutoClear.Checked)) then memoSummary.Clear;
-        memoSummary.Lines.Append('New try building a cross-compiler for '+FPCupManager.CrossOS_Target+'-'+FPCupManager.CrossCPU_Target+'.');
-
-        AddMessage('Looking for fpcupdeluxe cross-tools on GitHub (if any).');
-
-        if FPCupManager.CrossCPU_Target='arm' then BinsFileName:='ARM';
-        if FPCupManager.CrossCPU_Target='aarch64' then BinsFileName:='Aarch64';
-        if FPCupManager.CrossCPU_Target='x86_64' then BinsFileName:='x64';
-        if FPCupManager.CrossCPU_Target='i386' then BinsFileName:='i386';
-        if FPCupManager.CrossCPU_Target='powerpc' then BinsFileName:='PowerPC';
-        if FPCupManager.CrossCPU_Target='powerpc64' then BinsFileName:='PowerPC64';
-        if FPCupManager.CrossCPU_Target='mips' then BinsFileName:='Mips';
-        if FPCupManager.CrossCPU_Target='mipsel' then BinsFileName:='Mipsel';
-        if FPCupManager.CrossCPU_Target='sparc' then BinsFileName:='Sparc';
-        if FPCupManager.CrossCPU_Target='avr' then BinsFileName:='AVR';
-        if FPCupManager.CrossCPU_Target='i8086' then BinsFileName:='i8086';
-
-        if FPCupManager.CrossOS_Target='darwin' then
-        begin
-          // Darwin has some universal binaries and libs
-          if FPCupManager.CrossCPU_Target='i386' then BinsFileName:='x86';
-          if FPCupManager.CrossCPU_Target='x86_64' then BinsFileName:='x86';
-          //Newer bins and libs for Darwin on i386 and x86_64
-          //if FPCupManager.CrossCPU_Target='i386' then BinsFileName:='x86OSX1012';
-          //if FPCupManager.CrossCPU_Target='x86_64' then BinsFileName:='x86OSX1012';
-          if FPCupManager.CrossCPU_Target='powerpc' then BinsFileName:='powerpc';
-          if FPCupManager.CrossCPU_Target='powerpc64' then BinsFileName:='powerpc';
-        end;
-
-        if FPCupManager.CrossOS_Target='aix' then
-        begin
-          // AIX has some universal binaries
-          if FPCupManager.CrossCPU_Target='powerpc' then BinsFileName:='powerpc';
-          if FPCupManager.CrossCPU_Target='powerpc64' then BinsFileName:='powerpc';
-        end;
-
-        if FPCupManager.CrossOS_Target='freebsd' then BinsFileName:='FreeBSD'+BinsFileName else
-          if FPCupManager.CrossOS_Target='openbsd' then BinsFileName:='OpenBSD'+BinsFileName else
-            if FPCupManager.CrossOS_Target='aix' then BinsFileName:='AIX'+BinsFileName else
-              if FPCupManager.CrossOS_Target='msdos' then BinsFileName:='MSDos'+BinsFileName else
-                BinsFileName:=UppercaseFirstChar(FPCupManager.CrossOS_Target)+BinsFileName;
-
-        if FPCupManager.MUSL then BinsFileName:='MUSL'+BinsFileName;
-
-        // normally, we have the same names for libs and bins URL
-        LibsFileName:=BinsFileName;
-
-        // normally, we have the standard names for libs and bins paths
-        LibPath:=DirectorySeparator+'lib'+DirectorySeparator+FPCupManager.CrossCPU_Target+'-';
-        BinPath:=DirectorySeparator+'bin'+DirectorySeparator+FPCupManager.CrossCPU_Target+'-';
-        if FPCupManager.MUSL then
-        begin
-          LibPath:=LibPath+'musl';
-          BinPath:=BinPath+'musl';
-        end;
-        LibPath:=LibPath+FPCupManager.CrossOS_Target;
-        BinPath:=BinPath+FPCupManager.CrossOS_Target;
-
-        if FPCupManager.CrossOS_Target='darwin' then
-        begin
-          // Darwin is special: combined binaries and libs for i386 and x86_64 with osxcross
-          if (FPCupManager.CrossCPU_Target='i386') OR (FPCupManager.CrossCPU_Target='x86_64') then
+          if (Sender<>nil) then
           begin
-            BinPath:=StringReplace(BinPath,FPCupManager.CrossCPU_Target,'x86',[rfIgnoreCase]);
-            LibPath:=StringReplace(LibPath,FPCupManager.CrossCPU_Target,'x86',[rfIgnoreCase]);
-          end;
-          if (FPCupManager.CrossCPU_Target='powerpc') OR (FPCupManager.CrossCPU_Target='powerpc64') then
-          begin
-            BinPath:=StringReplace(BinPath,FPCupManager.CrossCPU_Target,'powerpc',[rfIgnoreCase]);
-            LibPath:=StringReplace(LibPath,FPCupManager.CrossCPU_Target,'powerpc',[rfIgnoreCase]);
+            if (MessageDlg('The building of a crosscompiler failed due to missing cross-tools.' + sLineBreak +
+                     'Fpcupdeluxe can try to download them if available !' + sLineBreak +
+                     'Do you want to continue ?'
+                     ,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then
+                     begin
+                       exit;
+                     end;
           end;
 
-          // Darwin is special: combined libs for arm and aarch64 with osxcross
-          if (FPCupManager.CrossCPU_Target='arm') OR (FPCupManager.CrossCPU_Target='aarch64') then
-          begin
-            LibPath:=StringReplace(LibPath,FPCupManager.CrossCPU_Target,'arm',[rfIgnoreCase]);
-            LibsFileName:=StringReplace(LibsFileName,'Aarch64','ARM',[rfIgnoreCase]);
-          end;
-        end;
+          BinsFileName:='';
 
-        if FPCupManager.CrossOS_Target='aix' then
-        begin
-          // AIX is special: combined binaries and libs for ppc and ppc64 with osxcross
-          if (FPCupManager.CrossCPU_Target='powerpc') OR (FPCupManager.CrossCPU_Target='powerpc64') then
-          begin
-            BinPath:=StringReplace(BinPath,FPCupManager.CrossCPU_Target,'powerpc',[rfIgnoreCase]);
-            LibPath:=StringReplace(LibPath,FPCupManager.CrossCPU_Target,'powerpc',[rfIgnoreCase]);
-          end;
-        end;
+          if ((Sender<>nil) AND (CheckAutoClear.Checked)) then memoSummary.Clear;
 
-        if FPCupManager.CrossOS_Target='linux' then
-        begin
-          // PowerPC64 is special: only little endian libs for now
-          if (FPCupManager.CrossCPU_Target='powerpc64') then
+          memoSummary.Lines.Append('New try building a cross-compiler for '+GetOS(FPCupManager.CrossOS_Target)+'-'+GetCPU(FPCupManager.CrossCPU_Target)+'.');
+
+          AddMessage('Looking for fpcupdeluxe cross-tools on GitHub (if any).');
+
+          // Setting the name[s] for the file to download
+          BinsFileName:=GetCPU(FPCupManager.CrossCPU_Target);
+
+          // Set special CPU case
+          if FPCupManager.CrossCPU_Target=TCPU.arm then BinsFileName:='ARM';
+          if FPCupManager.CrossCPU_Target=TCPU.aarch64 then BinsFileName:='Aarch64';
+          if FPCupManager.CrossCPU_Target=TCPU.x86_64 then BinsFileName:='x64';
+          if FPCupManager.CrossCPU_Target=TCPU.powerpc then BinsFileName:='PowerPC';
+          if FPCupManager.CrossCPU_Target=TCPU.powerpc64 then BinsFileName:='PowerPC64';
+          if FPCupManager.CrossCPU_Target=TCPU.mips then BinsFileName:='Mips';
+          if FPCupManager.CrossCPU_Target=TCPU.mipsel then BinsFileName:='Mipsel';
+          if FPCupManager.CrossCPU_Target=TCPU.sparc then BinsFileName:='Sparc';
+          if FPCupManager.CrossCPU_Target=TCPU.avr then BinsFileName:='AVR';
+
+          // Set special CPU names
+          if FPCupManager.CrossOS_Target=TOS.darwin then
           begin
-            LibsFileName:=StringReplace(LibsFileName,'PowerPC64','PowerPC64LE',[rfIgnoreCase]);
+            // Darwin has some universal binaries and libs
+            if FPCupManager.CrossCPU_Target=TCPU.i386 then BinsFileName:='All';
+            if FPCupManager.CrossCPU_Target=TCPU.x86_64 then BinsFileName:='All';
+            if FPCupManager.CrossCPU_Target=TCPU.aarch64 then BinsFileName:='All';
+            if FPCupManager.CrossCPU_Target=TCPU.powerpc then BinsFileName:='PowerPC';
+            if FPCupManager.CrossCPU_Target=TCPU.powerpc64 then BinsFileName:='PowerPC';
           end;
 
-          // ARM is special: can be hard or softfloat (Windows only binutils yet)
-          {$ifdef MSWINDOWS}
-          if (FPCupManager.CrossCPU_Target='arm') then
+          if FPCupManager.CrossOS_Target=TOS.ios then
           begin
-            if (Pos('SOFT',UpperCase(FPCupManager.CrossOPT))>0) OR (Pos('FPC_ARMEL',UpperCase(FPCupManager.FPCOPT))>0) then
-            begin
-              // use softfloat binutils
-              BinsFileName:=StringReplace(LibsFileName,'BinsLinuxARM','BinsLinuxARMSoft',[rfIgnoreCase]);
-            end;
+            // iOS has some universal binaries and libs
+            if FPCupManager.CrossCPU_Target=TCPU.arm then BinsFileName:='All';
+            if FPCupManager.CrossCPU_Target=TCPU.aarch64 then BinsFileName:='All';
+          end;
+
+          if FPCupManager.CrossOS_Target=TOS.aix then
+          begin
+            // AIX has some universal binaries
+            if FPCupManager.CrossCPU_Target=TCPU.powerpc then BinsFileName:='PowerPC';
+            if FPCupManager.CrossCPU_Target=TCPU.powerpc64 then BinsFileName:='PowerPC';
+          end;
+
+          // Set OS case
+          if FPCupManager.CrossOS_Target=TOS.morphos then s:='MorphOS' else
+            if FPCupManager.CrossOS_Target=TOS.freebsd then s:='FreeBSD' else
+              if FPCupManager.CrossOS_Target=TOS.dragonfly then s:='DragonFlyBSD' else
+                if FPCupManager.CrossOS_Target=TOS.openbsd then s:='OpenBSD' else
+                  if FPCupManager.CrossOS_Target=TOS.netbsd then s:='NetBSD' else
+                    if FPCupManager.CrossOS_Target=TOS.aix then s:='AIX' else
+                      if FPCupManager.CrossOS_Target=TOS.msdos then s:='MSDos' else
+                        if FPCupManager.CrossOS_Target=TOS.freertos then s:='FreeRTOS' else
+                          if FPCupManager.CrossOS_Target=TOS.win32 then s:='Windows' else
+                            if FPCupManager.CrossOS_Target=TOS.win64 then s:='Windows' else
+                              if FPCupManager.CrossOS_Target=TOS.ios then s:='IOS' else
+                              s:=UppercaseFirstChar(GetOS(FPCupManager.CrossOS_Target));
+
+          if FPCupManager.SolarisOI then s:=s+'OI';
+          BinsFileName:=s+BinsFileName;
+
+          if FPCupManager.MUSL then BinsFileName:='MUSL'+BinsFileName;
+
+          // normally, we have the same names for libs and bins URL
+          LibsFileName:=BinsFileName;
+
+
+          // Set special BinsFile for universal tools for Darwin
+          {$IF (defined(Windows)) OR (defined(Linux))}
+          if (
+            ((FPCupManager.CrossOS_Target=TOS.darwin) AND (FPCupManager.CrossCPU_Target in [TCPU.i386,TCPU.x86_64,TCPU.aarch64]))
+            OR
+            ((FPCupManager.CrossOS_Target=TOS.ios) AND (FPCupManager.CrossCPU_Target in [TCPU.arm,TCPU.aarch64]))
+            ) then
+          begin
+            BinsFileName:='AppleAll';
           end;
           {$endif}
-        end;
 
-        // bit tricky ... if bins and libs are already there exit this retry ... ;-)
-        if (
-           (DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+'cross'+BinPath))
-           OR
-           (DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+'cross'+LibPath))
-           )
-        then
-        begin
+          // Setting the location of libs and bins on our system, so they can be found by fpcupdeluxe
+          // Normally, we have the standard names for libs and bins paths
+          LibPath:=ConcatPaths([{$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION < 30200)}UnicodeString{$ENDIF}(CROSSPATH),'lib',GetCPU(FPCupManager.CrossCPU_Target)])+'-';
+          BinPath:=ConcatPaths([{$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION < 30200)}UnicodeString{$ENDIF}(CROSSPATH),'bin',GetCPU(FPCupManager.CrossCPU_Target)])+'-';
 
-          // many files to unpack for Darwin : do not show progress of unpacking files when unpacking for Darwin.
-          verbose:=(FPCupManager.CrossOS_Target<>'darwin');
-
-          if MissingCrossBins then
+          if FPCupManager.MUSL then
           begin
-            BaseBinsURL:='';
+            LibPath:=LibPath+'musl';
+            BinPath:=BinPath+'musl';
+          end;
+          LibPath:=LibPath+GetOS(FPCupManager.CrossOS_Target);
+          BinPath:=BinPath+GetOS(FPCupManager.CrossOS_Target);
+          if FPCupManager.SolarisOI then
+          begin
+            LibPath:=LibPath+'-oi';
+            BinPath:=BinPath+'-oi';
+          end;
 
-            if GetTargetOS='win32' then BaseBinsURL:='wincrossbins_v1.0'
-            else
-               if GetTargetOS='win64' then BaseBinsURL:='wincrossbins_v1.0'
-               else
-                  if GetTargetOS='linux' then
-                  begin
-                    if GetTargetCPU='i386' then BaseBinsURL:='linuxi386crossbins_v1.0';
-                    if GetTargetCPU='x86_64' then BaseBinsURL:='linuxx64crossbins_v1.0';
-                  end
-                  else
-                    if GetTargetOS='freebsd' then
-                    begin
-                      if GetTargetCPU='x86_64' then BaseBinsURL:='freebsdx64crossbins_v1.0';
-                    end
-                    else
-                      if GetTargetOS='darwin' then
-                      begin
-                        if GetTargetCPU='i386' then BaseBinsURL:='darwini386crossbins_v1.0';
-                        if GetTargetCPU='x86_64' then BaseBinsURL:='darwinx64crossbins_v1.0';
-                      end;
 
-            // no cross-bins available
-            if (Length(BaseBinsURL)=0) then
+          // Set special Bins directory for universal tools for Darwin based on clang
+          {$IF (defined(Windows)) OR (defined(Linux))}
+          if (
+            ((FPCupManager.CrossOS_Target=TOS.darwin) AND (FPCupManager.CrossCPU_Target in [TCPU.i386,TCPU.x86_64,TCPU.aarch64]))
+            OR
+            ((FPCupManager.CrossOS_Target=TOS.ios) AND (FPCupManager.CrossCPU_Target in [TCPU.arm,TCPU.aarch64]))
+            ) then
+          begin
+            BinPath:=StringReplace(BinPath,GetCPU(FPCupManager.CrossCPU_Target),'all',[]);
+            BinPath:=StringReplace(BinPath,GetOS(FPCupManager.CrossOS_Target),'apple',[]);
+          end;
+          {$endif}
+
+          if FPCupManager.CrossOS_Target=TOS.darwin then
+          begin
+            // Darwin is special: combined binaries and libs for i386 and x86_64 with osxcross
+            if (FPCupManager.CrossCPU_Target=TCPU.i386) OR (FPCupManager.CrossCPU_Target=TCPU.x86_64) OR (FPCupManager.CrossCPU_Target=TCPU.aarch64) then
             begin
-              ShowMessage('No tools available online. You could do a feature request ... ;-)');
-              exit;
+              BinPath:=StringReplace(BinPath,GetCPU(FPCupManager.CrossCPU_Target),'all',[]);
+              LibPath:=StringReplace(LibPath,GetCPU(FPCupManager.CrossCPU_Target),'all',[]);
+            end;
+            if (FPCupManager.CrossCPU_Target=TCPU.powerpc) OR (FPCupManager.CrossCPU_Target=TCPU.powerpc64) then
+            begin
+              BinPath:=StringReplace(BinPath,GetCPU(FPCupManager.CrossCPU_Target),GetCPU(TCPU.powerpc),[]);
+              LibPath:=StringReplace(LibPath,GetCPU(FPCupManager.CrossCPU_Target),GetCPU(TCPU.powerpc),[]);
+            end;
+          end;
+
+          if FPCupManager.CrossOS_Target=TOS.ios then
+          begin
+            // iOS is special: combined libs for arm and aarch64
+            if (FPCupManager.CrossCPU_Target=TCPU.arm) OR (FPCupManager.CrossCPU_Target=TCPU.aarch64) then
+            begin
+              BinPath:=StringReplace(BinPath,GetCPU(FPCupManager.CrossCPU_Target),'all',[]);
+              LibPath:=StringReplace(LibPath,GetCPU(FPCupManager.CrossCPU_Target),'all',[]);
+            end;
+          end;
+
+          if FPCupManager.CrossOS_Target=TOS.aix then
+          begin
+            // AIX is special: combined binaries and libs for ppc and ppc64 with osxcross
+            if (FPCupManager.CrossCPU_Target=TCPU.powerpc) OR (FPCupManager.CrossCPU_Target=TCPU.powerpc64) then
+            begin
+              BinPath:=StringReplace(BinPath,GetCPU(FPCupManager.CrossCPU_Target),GetCPU(TCPU.powerpc),[]);
+              LibPath:=StringReplace(LibPath,GetCPU(FPCupManager.CrossCPU_Target),GetCPU(TCPU.powerpc),[]);
+            end;
+          end;
+
+          //Put all windows stuff (not that much) in a single windows directory
+          if (FPCupManager.CrossOS_Target=TOS.win32) OR (FPCupManager.CrossOS_Target=TOS.win64) then
+          begin
+            BinPath:=StringReplace(BinPath,GetOS(FPCupManager.CrossOS_Target),'windows',[]);
+            LibPath:=StringReplace(LibPath,GetOS(FPCupManager.CrossOS_Target),'windows',[]);
+          end;
+
+          if FPCupManager.CrossOS_Target=TOS.linux then
+          begin
+            // PowerPC64 is special: only little endian libs for now
+            if (FPCupManager.CrossCPU_Target=TCPU.powerpc64) then
+            begin
+              LibsFileName:=StringReplace(LibsFileName,'PowerPC64','PowerPC64LE',[rfIgnoreCase]);
             end;
 
-            success:=false;
-            AddMessage('Going to download the right cross-bins. Can (will) take some time !',True);
-
-            BaseBinsURL:=FPCUPGITREPO+'/releases/download/'+BaseBinsURL;
-
+            // ARM is special: can be hard or softfloat (Windows only binutils yet)
             {$ifdef MSWINDOWS}
-            DownloadURL:=BaseBinsURL+'/'+'WinCrossBins'+BinsFileName;
-            {$else}
-            DownloadURL:=BaseBinsURL+'/'+'CrossBins'+BinsFileName;
-            {$endif MSWINDOWS}
-
-            //default to zip
-            DownloadURL:=DownloadURL+'.zip';
-            TargetFile := SysUtils.GetTempDir+GetFileNameFromURL(DownloadURL);
-            SysUtils.DeleteFile(TargetFile);
-            AddMessage('Please wait: Going to download the zip binary-tools from '+DownloadURL);
-            success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
-            ZipFile:=success;
-
-            {$ifndef Darwin}
-            // try rar .... very dirty and certainly not elegant ... ;-)
-            if (NOT success) then
+            if (FPCupManager.CrossCPU_Target=TCPU.arm) then
             begin
-              DownloadURL:=ChangeFileExt(DownloadURL,'.rar');
-              SysUtils.DeleteFile(TargetFile);
-              TargetFile := SysUtils.GetTempDir+GetFileNameFromURL(DownloadURL);
-              SysUtils.DeleteFile(TargetFile);
-              AddMessage('Please wait: Going to download the rar binary-tools from '+DownloadURL);
-              success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+              if (Pos('SOFT',UpperCase(FPCupManager.CrossOPT))>0) OR (Pos('FPC_ARMEL',UpperCase(FPCupManager.FPCOPT))>0) then
+              begin
+                // use softfloat binutils
+                BinsFileName:=StringReplace(LibsFileName,'BinsLinuxARM','BinsLinuxARMSoft',[rfIgnoreCase]);
+              end;
             end;
             {$endif}
+          end;
 
-            if success then
+          if FPCupManager.CrossOS_Target=TOS.freertos then
+          begin
+            // use embedded arm tools for freertos arm:
+            if (FPCupManager.CrossCPU_Target=TCPU.arm) then
             begin
-              AddMessage('Successfully downloaded binary-tools archive.');
-              TargetPath:=IncludeTrailingPathDelimiter(sInstallDir);
-              {$ifndef MSWINDOWS}
-              TargetPath:=IncludeTrailingPathDelimiter(sInstallDir)+'cross'+BinPath+DirectorySeparator;
-              {$endif}
-              if (NOT DirectoryExists(TargetPath)) then ForceDirectories(TargetPath);
+              BinsFileName:=StringReplace(BinsFileName,'FreeRTOS','Embedded',[]);
+            end;
+          end;
 
-              AddMessage('Going to extract archive into '+TargetPath);
+          // All ready !!
 
-              if ZipFile then
-              begin
-                with TNormalUnzipper.Create do
-                begin
-                  try
-                    success:=DoUnZip(TargetFile,TargetPath,[]);
-                  finally
-                    Free;
-                  end;
-                end;
-              end
+          LibsFileName:='CrossLibs'+LibsFileName;
+          {$ifdef MSWINDOWS}
+          BinsFileName:='WinCrossBins'+BinsFileName;
+          {$else}
+          BinsFileName:='CrossBins'+BinsFileName;
+          {$endif MSWINDOWS}
+
+          // bit tricky ... if bins and/or libs are already there exit this retry ... ;-)
+
+          if (NOT DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+BinPath)) then MissingCrossBins:=false;
+
+          if (FPCupManager.CrossOS_SubArch=TSUBARCH.saNone) then
+          begin
+            if (NOT DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+LibPath)) then MissingCrossLibs:=false;
+          end
+          else
+          begin
+            s:=ConcatPaths([sInstallDir,LibPath,GetSubarch(FPCupManager.CrossOS_SubArch)]);
+            if (NOT DirectoryIsEmpty(s)) then
+              MissingCrossLibs:=false
+            else
+              MissingCrossLibs:=true;// force the download of embedded libs if not there ... if this fails, don't worry, building will go on
+          end;
+
+          // Get tools !!
+          if (MissingCrossBins OR MissingCrossLibs) then
+          begin
+
+            // many files to unpack for Darwin : do not show progress of unpacking files when unpacking for Darwin.
+            verbose:=(FPCupManager.CrossOS_Target<>TOS.darwin);
+
+            if MissingCrossBins then
+            begin
+              AddMessage('Going to look for the right cross-bins. Can (will) take some time !',True);
+
+              BaseBinsURL:='';
+
+              if GetTargetOS=GetOS(TOS.win32) then BaseBinsURL:='wincrossbins'
               else
+                 if GetTargetOS=GetOS(TOS.win64) then BaseBinsURL:='wincrossbins'
+                 else
+                    if GetTargetOS=GetOS(TOS.linux) then
+                    begin
+                      if GetTargetCPU=GetCPU(TCPU.i386) then BaseBinsURL:='linuxi386crossbins';
+                      if GetTargetCPU=GetCPU(TCPU.x86_64) then BaseBinsURL:='linuxx64crossbins';
+                      if GetTargetCPU=GetCPU(TCPU.arm) then BaseBinsURL:='linuxarmcrossbins';
+                    end
+                    else
+                      if GetTargetOS=GetOS(TOS.freebsd) then
+                      begin
+                        if GetTargetCPU=GetCPU(TCPU.x86_64) then BaseBinsURL:='freebsdx64crossbins';
+                      end
+                      else
+                        if GetTargetOS=GetOS(TOS.solaris) then
+                        begin
+                          {if FPCupManager.SolarisOI then}
+                          begin
+                            if GetTargetCPU=GetCPU(TCPU.x86_64) then BaseBinsURL:='solarisoix64crossbins';
+                          end;
+                        end
+                        else
+                          if GetTargetOS=GetOS(TOS.darwin) then
+                          begin
+                            if GetTargetCPU=GetCPU(TCPU.i386) then BaseBinsURL:='darwini386crossbins';
+                            if GetTargetCPU=GetCPU(TCPU.x86_64) then BaseBinsURL:='darwinx64crossbins';
+                            if GetTargetCPU=GetCPU(TCPU.aarch64) then BaseBinsURL:='darwinarm64crossbins';
+                          end;
+
+
+              // no cross-bins available
+              if (Length(BaseBinsURL)=0) then
               begin
-                {$ifdef MSWINDOWS}
-                if (not verbose) then AddMessage('Please wait: going to unpack binary tools archive.');
-                success:=(ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+TargetFile+' "'+TargetPath+'"',verbose)=0);
-                if (NOT success) then
-                {$endif}
-                begin
-                  {$ifdef MSWINDOWS}
-                  UnZipper := IncludeTrailingPathDelimiter(FPCupManager.MakeDirectory) + 'unrar\bin\unrar.exe';
-                  {$else}
-                  UnZipper := 'unrar';
-                  {$endif}
-                  success:=CheckExecutable(UnZipper, '-v', '');
-                  if success then
-                  begin
-                    if (not verbose) then AddMessage('Please wait: going to unpack binary tools archive.');
-                    success:=(ExecuteCommand(UnZipper + ' x "' + TargetFile + '" "' + TargetPath + '"',verbose)=0);
-                  end else AddMessage('Error: '+UnZipper+' not found on system. Cannot unpack cross-tools !');
-                end;
+                ShowMessage('No tools available online. You could do a feature request ... ;-)');
+                exit;
               end;
 
-              if success then
+              AddMessage('Looking for: '+BinsFileName, True);
+
+              MajorVersion:=1;
+              for MinorVersion:=2 downto 0 do
               begin
-                {$IFDEF UNIX}
-                aList:=FindAllFiles(TargetPath);
+
+                //Add version
+                BinsURL:=BaseBinsURL+'_v'+InttoStr(MajorVersion)+'.'+InttoStr(MinorVersion);
+
+                success:=false;
+
+                TargetFile:=BinsFileName;
+
+                DownloadURL:=FPCUPGITREPOAPI+'/tags/'+BinsURL;
+
+                AddMessage('Looking for bins in: '+DownloadURL, True);
+
+                aList:=TStringList.Create;
                 try
-                  if (aList.Count > 0) then
+                  aList.Clear;
+                  try
+                    GetGitHubFileList(DownloadURL,aList,FPCupManager.UseWget,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+                  except
+                    on E : Exception do
+                    begin
+                      //AddMessage('Could not get binutils file list from '+DownloadURL+'.');
+                      //continue;
+                    end;
+                  end;
+                  //Prefer a zip-file
+                  for i:=0 to Pred(aList.Count) do
+                  begin
+                    if AnsiContainsText(aList[i],TargetFile+'.zip') then
+                    begin
+                      TargetFile := TargetFile+'.zip';
+                      success:=true;
+                      break;
+                    end;
+                  end;
+                  if NOT success then
                   begin
                     for i:=0 to Pred(aList.Count) do
                     begin
-                      fpChmod(aList.Strings[i],&755);
+                      if AnsiContainsText(aList[i],TargetFile) then
+                      begin
+                        TargetFile := FileNameFromURL(aList[i]);
+                        success:=true;
+                        break;
+                      end;
+                    end;
+                  end;
+
+                finally
+                  aList.Free;
+                end;
+
+                if success then
+                begin
+                  DownloadURL:=FPCUPGITREPO+'/releases/download/'+BinsURL+'/'+TargetFile;
+                  AddMessage('Found correct online binutils at: '+DownloadURL);
+                  AddMessage('Going to download the cross-bins. Can (will) take some time !',True);
+                  TargetFile := IncludeTrailingPathDelimiter(FPCupManager.TempDirectory)+TargetFile;
+                  SysUtils.DeleteFile(TargetFile);
+                  success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+                  if success then AddMessage('Download successfull !');
+                end;
+
+                if success then
+                begin
+                  ZipFile:=(ExtractFileExt(TargetFile)='.zip');
+                  TargetPath:=IncludeTrailingPathDelimiter(sInstallDir);
+                  {$ifndef MSWINDOWS}
+                  TargetPath:=IncludeTrailingPathDelimiter(sInstallDir)+BinPath+DirectorySeparator;
+                  {$endif}
+                  ForceDirectoriesSafe(TargetPath);
+
+                  AddMessage('Going to extract archive into '+TargetPath);
+
+                  if ZipFile then
+                  begin
+                    with TNormalUnzipper.Create do
+                    begin
+                      try
+                        success:=DoUnZip(TargetFile,TargetPath,[]);
+                      finally
+                        Free;
+                      end;
+                    end;
+                  end
+                  else
+                  begin
+                    {$ifdef MSWINDOWS}
+                    if (not verbose) then AddMessage('Please wait: going to unpack binary tools archive.');
+                    success:={%H-}RunCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+TargetFile+' "'+TargetPath+'"',s);
+                    if (NOT success) then
+                    {$endif}
+                    begin
+                      {$ifdef MSWINDOWS}
+                      UnZipper := IncludeTrailingPathDelimiter(FPCupManager.MakeDirectory) + 'unrar\bin\unrar.exe';
+                      {$else}
+                      UnZipper := 'unrar';
+                      {$endif}
+                      success:=CheckExecutable(UnZipper, ['-v'], '');
+                      if success then
+                      begin
+                        if (not verbose) then AddMessage('Please wait: going to unpack binary tools archive.');
+                        success:={%H-}RunCommand(UnZipper + ' x "' + TargetFile + '" "' + TargetPath + '"',s);
+                      end else AddMessage('Error: '+UnZipper+' not found on system. Cannot unpack cross-tools !');
+                    end;
+                  end;
+                end;
+
+                SysUtils.DeleteFile(TargetFile);
+
+                if success then
+                begin
+                  aList:=TStringList.Create;
+                  try
+                    aList.Add('These binary utilities were happily provided to you by fpcupdeluxe.');
+                    aList.Add('You can find them at:');
+                    aList.Add(DownloadURL);
+                    s:=IncludeTrailingPathDelimiter(sInstallDir)+BinPath+DirectorySeparator+FPCUP_ACKNOWLEDGE;
+                    SysUtils.DeleteFile(s);
+                    aList.SaveToFile(s);
+                  finally
+                    aList.Free;
+                  end;
+                  {$IFDEF UNIX}
+                  aList:=FindAllFiles(TargetPath);
+                  try
+                    if (aList.Count > 0) then
+                    begin
+                      for i:=0 to Pred(aList.Count) do
+                      begin
+                        fpChmod(aList.Strings[i],&755);
+                      end;
+                    end;
+                  finally
+                    aList.Free;
+                  end;
+                  {$ENDIF}
+                  MissingCrossBins:=False;
+                  break;
+                end;
+              end;
+            end;
+
+            // force the download of embedded libs if not there ... if this fails, don't worry, building will go on
+            if (DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+LibPath)) AND (FPCupManager.CrossOS_Target=TOS.embedded)
+              then MissingCrossLibs:=true;
+
+            if MissingCrossLibs then
+            begin
+              if ((FPCupManager.CrossCPU_Target=TCPU.arm) AND (FPCupManager.CrossOS_Target=TOS.freertos)) then
+              begin
+                s:='10.4.3';
+                LibsFileName:='FreeRTOS-'+s+'-for-FreePascal.zip';
+                DownloadURL:='https://github.com/michael-ring/freertos4fpc/releases/download/v'+s+'-2/'+LibsFileName;
+                TargetFile := IncludeTrailingPathDelimiter(FPCupManager.TempDirectory)+LibsFileName;
+                SysUtils.DeleteFile(TargetFile);
+                success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+                if success then
+                begin
+                  AddMessage('Download successfull !');
+                  TargetPath:=IncludeTrailingPathDelimiter(sInstallDir)+LibPath+DirectorySeparator;
+                  ForceDirectoriesSafe(IncludeTrailingPathDelimiter(sInstallDir)+LibPath);
+                  with TNormalUnzipper.Create do
+                  begin
+                    try
+                      success:=DoUnZip(TargetFile,TargetPath,[]);
+                    finally
+                      Free;
+                    end;
+                  end;
+                  if success then
+                  begin
+                    SysUtils.DeleteFile(TargetFile);
+                    MissingCrossLibs:=False;
+                  end;
+                end;
+              end;
+            end;
+
+
+            if MissingCrossLibs then
+            begin
+              AddMessage('Going to look for the right cross-libraries. Can (will) take some time !',True);
+
+
+              AddMessage('Looking for: '+LibsFileName,True);
+
+              MajorVersion:=1;
+              for MinorVersion:=3 downto 0 do
+              begin
+                LibsURL:='crosslibs_v'+InttoStr(MajorVersion)+'.'+InttoStr(MinorVersion);
+
+                TargetFile:=LibsFileName;
+
+                DownloadURL:=FPCUPGITREPOAPI+'/tags/'+LibsURL;
+
+                AddMessage('Looking for libs in: '+DownloadURL, True);
+
+                success:=false;
+                aList:=TStringList.Create;
+                try
+                  aList.Clear;
+                  try
+                    GetGitHubFileList(DownloadURL,aList,FPCupManager.UseWget,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+                  except
+                    on E : Exception do
+                    begin
+                      //AddMessage('Could not get libraries file list from '+DownloadURL+'.');
+                      //continue;
+                    end;
+                  end;
+
+                  //Prefer a zip-file
+                  for i:=0 to Pred(aList.Count) do
+                  begin
+                    if Pos(TargetFile+'.zip',aList[i])>0 then
+                    begin
+                      TargetFile := TargetFile+'.zip';
+                      success:=true;
+                      break;
+                    end;
+                  end;
+                  if NOT success then
+                  begin
+                    for i:=0 to Pred(aList.Count) do
+                    begin
+                      s:=aList[i];
+                      if Pos(TargetFile,s)>0 then
+                      begin
+                        TargetFile := FileNameFromURL(s);
+                        success:=true;
+                        break;
+                      end;
                     end;
                   end;
                 finally
                   aList.Free;
                 end;
-                {$ENDIF}
+
+                if success then
+                begin
+                  DownloadURL:=FPCUPGITREPO+'/releases/download/'+LibsURL+'/'+TargetFile;
+                  AddMessage('Found correct online libraries at: '+DownloadURL);
+                  AddMessage('Going to download the cross-libraries. Can (will) take some time !',True);
+                  TargetFile := IncludeTrailingPathDelimiter(FPCupManager.TempDirectory)+TargetFile;
+                  SysUtils.DeleteFile(TargetFile);
+                  success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
+                  if success then AddMessage('Download successfull !');
+                end;
+
+                if success then
+                begin
+                  ZipFile:=(ExtractFileExt(TargetFile)='.zip');
+                  TargetPath:=IncludeTrailingPathDelimiter(sInstallDir);
+                  //TargetPath:=IncludeTrailingPathDelimiter(sInstallDir)+LibPath+DirectorySeparator;
+                  //ForceDirectoriesSafe(IncludeTrailingPathDelimiter(sInstallDir)+LibPath);
+
+                  AddMessage('Going to extract archive into '+TargetPath);
+
+                  if ZipFile then
+                  begin
+                    with TNormalUnzipper.Create do
+                    begin
+                      try
+                        success:=DoUnZip(TargetFile,TargetPath,[]);
+                      finally
+                        Free;
+                      end;
+                    end;
+                  end
+                  else
+                  begin
+                    {$ifdef MSWINDOWS}
+                    if (not verbose) then AddMessage('Please wait: going to unpack library files archive.');
+                    success:={%H-}RunCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+TargetFile+' "'+TargetPath+'"',s);
+                    if (NOT success) then
+                    {$endif}
+                    begin
+                      {$ifdef MSWINDOWS}
+                      UnZipper := IncludeTrailingPathDelimiter(FPCupManager.MakeDirectory) + 'unrar\bin\unrar.exe';
+                      {$else}
+                      UnZipper := 'unrar';
+                      {$endif}
+                      success:=CheckExecutable(UnZipper, ['-v'], '');
+                      if success then
+                      begin
+                        if (not verbose) then AddMessage('Please wait: going to unpack library files archive.');
+                        success:={%H-}RunCommand(UnZipper + ' x "' + TargetFile + '" "' + TargetPath + '"',s);
+                      end else AddMessage('Error: '+UnZipper+' not found on system. Cannot unpack cross-tools !');
+                    end;
+                  end;
+                end;
+                SysUtils.DeleteFile(TargetFile);
+
+                if success then
+                begin
+                  aList:=TStringList.Create;
+                  try
+                    aList.Add('These libraries were happily provided to you by fpcupdeluxe.');
+                    aList.Add('You can find them at:');
+                    aList.Add(DownloadURL);
+                    s:=IncludeTrailingPathDelimiter(sInstallDir)+LibPath+DirectorySeparator+FPCUP_ACKNOWLEDGE;
+                    SysUtils.DeleteFile(s);
+                    aList.SaveToFile(s);
+                  finally
+                    aList.Free;
+                  end;
+                  MissingCrossLibs:=False;
+                  break;
+                end;
               end;
+
+              // as libraries are not always needed for embedded, end with success even if the above has failed
+              if FPCupManager.CrossOS_Target=TOS.embedded then
+              begin
+                success:=true;
+                MissingCrossLibs:=False;
+              end;
+
             end;
-            SysUtils.DeleteFile(TargetFile);
-            if success then MissingCrossBins:=False;
-          end;
-
-          // force the download of embedded libs if not there ... if this fails, don't worry, building will go on
-          if (DirectoryIsEmpty(IncludeTrailingPathDelimiter(sInstallDir)+'cross'+LibPath)) AND (FPCupManager.CrossOS_Target='embedded')
-            then MissingCrossLibs:=true;
-
-          if MissingCrossLibs then
-          begin
-            BaseLibsURL:=FPCUPGITREPO+'/releases/download/crosslibs_v1.1';
-
-            AddMessage('Going to download the right cross-libs. Can (will) take some time !',True);
-            DownloadURL:=BaseLibsURL+'/'+'CrossLibs'+LibsFileName;
-
-            // default to zip
-            DownloadURL:=DownloadURL+'.zip';
-
-            TargetFile := SysUtils.GetTempDir+GetFileNameFromURL(DownloadURL);
-            SysUtils.DeleteFile(TargetFile);
-            success:=false;
-            AddMessage('Please wait: Going to download the libraries from '+DownloadURL);
-            success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
-            ZipFile:=success;
-
-            {$ifndef Darwin}
-            // if rar then try zip ... if zip then try rar .... very dirty and certainly not elegant ... ;-)
-            if (NOT success) then
-            begin
-              DownloadURL:=ChangeFileExt(DownloadURL,'.rar');
-              SysUtils.DeleteFile(TargetFile);
-              TargetFile := SysUtils.GetTempDir+GetFileNameFromURL(DownloadURL);
-              SysUtils.DeleteFile(TargetFile);
-              AddMessage('Please wait: Going to download the libraries from '+DownloadURL);
-              success:=DownLoad(FPCupManager.UseWget,DownloadURL,TargetFile,FPCupManager.HTTPProxyHost,FPCupManager.HTTPProxyPort,FPCupManager.HTTPProxyUser,FPCupManager.HTTPProxyPassword);
-            end;
-            {$endif}
 
             if success then
             begin
-              AddMessage('Successfully downloaded the libraries.');
-              TargetPath:=IncludeTrailingPathDelimiter(sInstallDir);
-              //TargetPath:=IncludeTrailingPathDelimiter(sInstallDir)+'cross'+LibPath+DirectorySeparator;
-              //if (NOT DirectoryExists(IncludeTrailingPathDelimiter(sInstallDir)+'cross'+LibPath)) then ForceDirectories(IncludeTrailingPathDelimiter(sInstallDir)+'cross'+LibPath);
+              AddMessage('Successfully extracted cross-tools.');
+              // run again with the correct libs and binutils
+              FPCVersionLabel.Font.Color:=clDefault;
+              LazarusVersionLabel.Font.Color:=clDefault;
+              AddMessage('Got all tools now. Building a cross-compiler for '+GetOS(FPCupManager.CrossOS_Target)+'-'+GetCPU(FPCupManager.CrossCPU_Target),True);
+              memoSummary.Lines.Append('Got all tools now. Start building cross-compiler.');
+              if Assigned(FPCupManager.Sequencer) then FPCupManager.Sequencer.ResetAllExecuted;
 
-              AddMessage('Going to extract them into '+TargetPath);
+              AddMessage(sStatus);
+              memoSummary.Lines.Append(sStatus);
 
-              if ZipFile then
-              begin
-                with TNormalUnzipper.Create do
-                begin
-                  try
-                    success:=DoUnZip(TargetFile,TargetPath,[]);
-                  finally
-                    Free;
-                  end;
-                end;
-              end
-              else
-              begin
-                {$ifdef MSWINDOWS}
-                if (not verbose) then AddMessage('Please wait: going to unpack library files archive.');
-                success:=(ExecuteCommand('"C:\Program Files (x86)\WinRAR\WinRAR.exe" x '+TargetFile+' "'+TargetPath+'"',verbose)=0);
-                if (NOT success) then
-                {$endif}
-                begin
-                  {$ifdef MSWINDOWS}
-                  UnZipper := IncludeTrailingPathDelimiter(FPCupManager.MakeDirectory) + 'unrar\bin\unrar.exe';
-                  {$else}
-                  UnZipper := 'unrar';
-                  {$endif}
-                  success:=CheckExecutable(UnZipper, '-v', '');
-                  if success then
-                  begin
-                    if (not verbose) then AddMessage('Please wait: going to unpack library files archive.');
-                    success:=(ExecuteCommand(UnZipper + ' x "' + TargetFile + '" "' + TargetPath + '"',verbose)=0);
-                  end else AddMessage('Error: '+UnZipper+' not found on system. Cannot unpack cross-tools !');
-                end;
-              end;
-            end;
-            SysUtils.DeleteFile(TargetFile);
-            // as libraries are not needed for embedded, always end with success even if the above has failed
-            if FPCupManager.CrossOS_Target='embedded' then success:=true;
-            if success then MissingCrossLibs:=False;
+              success:= RealRun;
+
+            end else AddMessage('No luck in getting then cross-tools ... aborting.');
           end;
-
-          if success then
-          begin
-            AddMessage('Successfully extracted cross-tools.');
-            // run again with the correct libs and binutils
-            FPCVersionLabel.Font.Color:=clDefault;
-            LazarusVersionLabel.Font.Color:=clDefault;
-            AddMessage('Got all tools now. Building a cross-compiler for '+FPCupManager.CrossOS_Target+'-'+FPCupManager.CrossCPU_Target,True);
-            memoSummary.Lines.Append('Got all tools now. Start building cross-compiler.');
-            if Assigned(FPCupManager.Sequencer) then FPCupManager.Sequencer.ResetAllExecuted;
-            RealRun;
-          end;
-
-          if (NOT success) then AddMessage('No luck in getting then cross-tools ... aborting.');
+        end
+        else
+        begin
+          AddMessage('Building cross-tools failed. Aborting.');
         end;
-      end
-      else
-      begin
-        AddMessage('Building cross-tools failed ... ??? ... aborting.');
+
       end;
 
-    end;
+      if success then
+        Form2.SetCrossAvailable(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch,true);
 
-  finally
-    DisEnable(Sender,True);
+    finally
+      DisEnable(Sender,True);
+    end;
   end;
 
   result:=success;
 end;
 
-function TForm1.RemoveCrossCompiler(Sender: TObject):boolean;
+procedure TForm1.InstallClick(Sender: TObject);
 var
-  success:boolean;
-  i:integer;
   s:string;
+  FModuleList: TStringList;
 begin
-  result:=false;
 
-  if (radgrpCPU.ItemIndex=-1) and (radgrpOS.ItemIndex=-1) then
+  s:='';
+  if Sender=BitBtnFPCOnly then
+    if (Length(FPCTarget)=0) then s:='Please select a FPC target first';
+  if Sender=BitBtnLazarusOnly then
+    if (Length(LazarusTarget)=0) then s:='Please select a Lazarus target first';
+  if Sender=BitBtnFPCandLazarus then
+    if (Length(FPCTarget)=0) or (Length(LazarusTarget)=0) then s:='Please select a FPC and Lazarus target first';
+
+  if Length(s)>0 then
   begin
-    ShowMessage('Please select a CPU and OS target first');
+    ShowMessage(s);
     exit;
   end;
 
-  PrepareRun;
+  s:='';
+  if Sender=BitBtnFPCOnly then s:='Going to install/update FPC.';
+  if Sender=BitBtnLazarusOnly then s:='Going to install/update Lazarus.';
+  if Sender=BitBtnFPCandLazarus then s:='Going to install/update FPC and Lazarus.';
+  s:=s+sLineBreak;
+  s:=s+'Install directory: '+Self.sInstallDir;
+  s:=s+sLineBreak;
+  s:=s+'Do you want to continue ?';
+  if (MessageDlg(s,mtConfirmation,[mbYes, mbNo],0)<>mrYes) then exit;
 
-  if radgrpCPU.ItemIndex<>-1 then
-  begin
-    s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
-    if s='ppc' then s:='powerpc';
-    if s='ppc64' then s:='powerpc64';
-    if s='x8664' then s:='x86_64';
-    FPCupManager.CrossCPU_Target:=s;
-  end;
-  if radgrpOS.ItemIndex<>-1 then
-  begin
-    s:=radgrpOS.Items[radgrpOS.ItemIndex];
-    if s='i-sim' then s:='iphonesim';
-    FPCupManager.CrossOS_Target:=s;
-  end;
-
-  if (FPCupManager.CrossOS_Target='java') then FPCupManager.CrossCPU_Target:='jvm';
-  if (FPCupManager.CrossOS_Target='msdos') then FPCupManager.CrossCPU_Target:='i8086';
-  //For i8086 embedded and win16 are also ok, but not [yet] implemented by fpcupdeluxe
-  if (FPCupManager.CrossCPU_Target='i8086') then FPCupManager.CrossOS_Target:='msdos';
-  if (FPCupManager.CrossOS_Target='go32v2') then FPCupManager.CrossCPU_Target:='i386';
-
-  if FPCupManager.CrossOS_Target='windows' then
-  begin
-    if FPCupManager.CrossCPU_Target='i386' then FPCupManager.CrossOS_Target:='win32';
-    if FPCupManager.CrossCPU_Target='x86_64' then FPCupManager.CrossOS_Target:='win64';
-  end;
-
-  if (FPCupManager.CrossCPU_Target='') then
-  begin
-    if Sender<>nil then Application.MessageBox(PChar('Please select a CPU target first.'), PChar('CPU error'), MB_ICONERROR);
-    FPCupManager.CrossOS_Target:=''; // cleanup
-    exit;
-  end;
-
-  if (FPCupManager.CrossOS_Target='') then
-  begin
-    if Sender<>nil then Application.MessageBox(PChar('Please select an OS target first.'), PChar('OS error'), MB_ICONERROR);
-    FPCupManager.CrossCPU_Target:=''; // cleanup
-    exit;
-  end;
-
-  if assigned(CrossInstallers) then
-  begin
-    success:=false;
-    for i := 0 to CrossInstallers.Count - 1 do
-    begin
-      success:=(CrossInstallers[i] = GetFPCTargetCPUOS(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,false));
-      if success then break;
-    end;
-    if (NOT success) then
-    begin
-      if Sender<>nil then
-      begin
-        Application.MessageBox(PChar('No valid CPU / OS crosscompiler found.'), PChar('FPCUPDELUXE Limitation'), MB_ICONERROR);
-      end
-      else
-      begin
-        memoSummary.Lines.Append('');
-        memoSummary.Lines.Append('FPCUPDELUXE Limitation: No valid CPU / OS crosscompiler found. Skipping');
-      end;
-      FPCupManager.CrossOS_Target:=''; // cleanup
-      FPCupManager.CrossCPU_Target:=''; // cleanup
-      exit;
-    end;
-  end;
-
-  // use the available source to build the cross-compiler ... change nothing about source and url !!
-  FPCupManager.OnlyModules:=_LCLALLREMOVEONLY+','+_FPCREMOVEONLY;
-
-  success:=RealRun;
-
-  result:=success;
-end;
-
-
-procedure TForm1.FPCOnlyClick(Sender: TObject);
-begin
-  if (Length(FPCTarget)=0) then
-  begin
-    ShowMessage('Please select a FPC target first');
-    exit;
-  end;
   DisEnable(Sender,False);
   try
     PrepareRun;
 
+    s:='';
+
     if Form2.UpdateOnly then
     begin
-      FPCupManager.OnlyModules:=_FPCCLEANBUILDONLY;
+
+      if Sender=BitBtnFPCOnly then
+      begin
+        {$ifdef win32}
+        s:=_FPCCLEANBUILDONLY+','+_FPC+_CROSSWIN;
+        {$else}
+        s:=_FPCCLEANBUILDONLY;
+        {$endif}
+      end;
+
+      if Sender=BitBtnLazarusOnly then
+      begin
+        s:=_LAZARUSCLEANBUILDONLY;
+      end;
+
+      if Sender=BitBtnFPCandLazarus then
+      begin
+        // still not working 100% for Lazarus ...  todo
+        // packages that are installed by the user are not included
+        s:=_FPCCLEANBUILDONLY+','+_LAZARUSCLEANBUILDONLY;
+        FModuleList:=TStringList.Create;
+        try
+          GetModuleEnabledList(FModuleList);
+          // also include enabled modules (packages) when rebuilding Lazarus
+          if FModuleList.Count>0 then s:=s+','+FModuleList.CommaText;
+        finally
+          FModuleList.Free;
+        end;
+      end;
+
+      if Length(s)>0 then
+        FPCupManager.OnlyModules:=s
+      else
+        begin
+          ShowMessage('No sequence defined. Should never happen. Please file bugger.');
+          exit;
+        end;
     end
     else
     begin
-      {$ifdef win32}
-      //Only auto-install win32 -> win64 crossutils
-      FPCupManager.OnlyModules:=_FPC+','+_FPC+_CROSSWIN;
-      {$else}
-      FPCupManager.OnlyModules:=_FPC;
-      {$endif}
+
+      if Sender=BitBtnFPCOnly then
+      begin
+        s:=_FPC;
+      end;
+
+      if Sender=BitBtnLazarusOnly then
+      begin
+        {$IF defined(CPUAARCH64) or defined(CPUARM) or defined(CPUARMHF) or defined(HAIKU) or defined(CPUPOWERPC64)}
+        s:=_LAZARUSSIMPLE;
+        {$ELSE}
+        s:=_LAZARUS;
+        {$ENDIF}
+      end;
+
+      if Sender=BitBtnFPCandLazarus then
+      begin
+        //use standard install/default sequence
+      end;
+
+      if Length(s)>0 then FPCupManager.OnlyModules:=s;
+
     end;
 
     if NOT Form2.IncludeHelp then
     begin
-      if Length(FPCupManager.SkipModules)>0 then FPCupManager.SkipModules:=FPCupManager.SkipModules+',';
-      FPCupManager.SkipModules:=FPCupManager.SkipModules+_HELPFPC;
+      if ((Sender=BitBtnFPCOnly) OR (Sender=BitBtnFPCandLazarus)) then FPCupManager.SkipModules:=FPCupManager.SkipModules+','+_HELPFPC;
+      if ((Sender=BitBtnLazarusOnly) OR (Sender=BitBtnFPCandLazarus)) then FPCupManager.SkipModules:=FPCupManager.SkipModules+','+_HELPLAZARUS;
+    end
+    else
+    begin
+      if ((Sender=BitBtnLazarusOnly) OR (Sender=BitBtnFPCandLazarus)) then
+      begin
+        FPCupManager.IncludeModules:=FPCupManager.IncludeModules+','+_LHELP;
+      end;
     end;
 
-    sStatus:='Going to install/update FPC only.';
+    //Delete stray comma
+    s:=FPCupManager.IncludeModules;
+    if Pos(',',s)=1 then
+    begin
+      Delete(s,1,1);
+      FPCupManager.IncludeModules:=s;
+    end;
+    //Delete stray comma
+    s:=FPCupManager.SkipModules;
+    if Pos(',',s)=1 then
+    begin
+      Delete(s,1,1);
+      FPCupManager.SkipModules:=s;
+    end;
+
+    if Sender=BitBtnFPCOnly then
+      sStatus:='Going to install/update FPC only';
+    if Sender=BitBtnLazarusOnly then
+      sStatus:='Going to install/update Lazarus only';
+    if Sender=BitBtnFPCandLazarus then
+      sStatus:='Going to install/update FPC and Lazarus';
+
+    AddMessage(sStatus+' with given options.');
 
     {$ifdef RemoteLog}
-    aDataClient.UpInfo.UpFunction:=ufInstallFPC;
+    aDataClient.UpInfo.UpFunction:=ufInstallFPCLAZ;
+    if Sender=BitBtnFPCOnly then aDataClient.UpInfo.UpFunction:=ufInstallFPC;
+    if Sender=BitBtnLazarusOnly then aDataClient.UpInfo.UpFunction:=ufInstallLAZ;
     {$endif}
 
     RealRun;
 
-  finally
-    DisEnable(Sender,True);
-  end;
-end;
-
-procedure TForm1.LazarusOnlyClick(Sender: TObject);
-begin
-  if (Length(LazarusTarget)=0) then
-  begin
-    ShowMessage('Please select a Lazarus target first');
-    exit;
-  end;
-
-  DisEnable(Sender,False);
-
-  try
-    PrepareRun;
-
-    if Form2.UpdateOnly then
-    begin
-      FPCupManager.OnlyModules:=_LAZARUSCLEANBUILDONLY;
-    end
-    else
-    begin
-      {$ifdef win32}
-      //Only auto-install win32 -> win64 crossutils
-      FPCupManager.OnlyModules:=_LAZARUS+','+_LAZARUS+_CROSSWIN;
-      {$else}
-      FPCupManager.OnlyModules:=_LAZARUS;
-      {$endif}
-    end;
-
-    if (NOT Form2.IncludeHelp) then
-    begin
-      if Length(FPCupManager.SkipModules)>0 then FPCupManager.SkipModules:=FPCupManager.SkipModules+',';
-      FPCupManager.SkipModules:=FPCupManager.SkipModules+_HELPLAZARUS;
-    end
-    else
-    begin
-      if Length(FPCupManager.IncludeModules)>0 then FPCupManager.IncludeModules:=FPCupManager.IncludeModules+',';
-      FPCupManager.IncludeModules:=FPCupManager.IncludeModules+'lhelp';
-    end;
-
-    sStatus:='Going to install/update Lazarus only.';
-
-    {$ifdef RemoteLog}
-    aDataClient.UpInfo.UpFunction:=ufInstallLAZ;
-    {$endif}
-
-    RealRun;
   finally
     DisEnable(Sender,True);
   end;
 end;
 
 procedure TForm1.btnSetupPlusClick(Sender: TObject);
+var
+  s:string;
 begin
+  if radgrpCPU.ItemIndex<>-1 then
+  begin
+    s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+    FPCupManager.CrossCPU_Target:=GetTCPU(s);
+  end;
+
+  if radgrpOS.ItemIndex<>-1 then
+  begin
+    s:=radgrpOS.Items[radgrpOS.ItemIndex];
+    FPCupManager.CrossOS_Target:=GetTOS(s);
+  end;
+  Form2.SetCrossTarget(FPCupManager,FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target,FPCupManager.CrossOS_SubArch);
+
   Form2.ShowModal;
   if Form2.ModalResult=mrOk then
   begin
@@ -2875,22 +3608,37 @@ begin
   end;
 end;
 
-procedure TForm1.btnClearLogClick(Sender: TObject);
+procedure TForm1.btnLogClick(Sender: TObject);
 begin
-  CommandOutputScreen.ClearAll;
-  memoSummary.Clear;
+  if (Sender=btnClearLog) then
+  begin
+    CommandOutputScreen.ClearAll;
+    memoSummary.Clear;
+  end;
+  if (Sender=btnSendLog) then
+  begin
+    memoSummary.Lines.Append('');
+    memoSummary.Lines.Append('Sending email to "fpcupdeluxe@gmail.com" with content of command screen !');
+    SendMail('smtp.gmail.com',
+             'Fpcupdeluxe log report',
+             'fpcupdeluxe@gmail.com',
+             'upuser@gmail.com',
+             'fpcupdeluxe@gmail.com',
+             'W0/0MT6Veeg7CN5R',
+             CommandOutputScreen.Lines);
+  end;
 end;
 
 procedure TForm1.Edit1Change(Sender: TObject);
 begin
   sInstallDir:=InstallDirEdit.Text;
-  GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
+  if DirectoryExists(sInstallDir) then GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
 end;
 
 procedure TForm1.Edit1KeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
   sInstallDir:=InstallDirEdit.Text;
-  GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
+  if DirectoryExists(sInstallDir) then GetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
 end;
 
 procedure TForm1.FPCVersionLabelClick(Sender: TObject);
@@ -2915,10 +3663,11 @@ end;
 
 procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 begin
+  Self.OnResize:=nil;
   if Assigned(FPCupManager) then
   begin
     Application.MainForm.Cursor:=crHourGlass;
-    with TIniFile.Create(SafeGetApplicationPath+installerUniversal.DELUXEFILENAME) do
+    with TMemIniFile.Create(SafeGetApplicationPath+installerUniversal.DELUXEFILENAME) do
     try
       WriteString('General','InstallDirectory',sInstallDir);
       {$ifdef RemoteLog}
@@ -2934,28 +3683,16 @@ begin
       WriteString('ProxySettings','HTTPProxyUser',FPCupManager.HTTPProxyUser);
       WriteString('ProxySettings','HTTPProxyPass',FPCupManager.HTTPProxyPassword);
 
-      WriteInteger('General','CommandFontSize',CommandOutputScreen.Font.Size);
-
-      if Self.WindowState=wsNormal then
-      begin
-        WriteInteger('General','Top',Self.Top);
-        WriteInteger('General','Left',Self.Left);
-        WriteInteger('General','Width',Self.Width);
-        WriteInteger('General','Height',Self.Height);
-        WriteBool('General','Maximized',False);
-      end
-      else
-      begin
-        WriteBool('General','Maximized',True);
-      end;
-
+      UpdateFile;
     finally
       Free;
     end;
 
     SetFPCUPSettings(IncludeTrailingPathDelimiter(sInstallDir));
 
-    FPCupManager.Free;
+    FPCupManager.Destroy;
+    FPCupManager:=nil;
+
   end;
 
   CloseAction:=caFree;
@@ -3001,23 +3738,24 @@ begin
   MissingCrossLibs:=false;
   MissingTools:=false;
 
-  {$ifdef win64}
-  FPCupManager.NoJobs:=true;
-  {$else}
   FPCupManager.NoJobs:=(NOT Form2.MakeJobs);
-  {$endif}
+
+  FPCupManager.SoftFloat:=Form2.UseSoftFloat;
+  FPCupManager.OnlinePatching:=Form2.OnlinePatching;
 
   FPCupManager.OnlyModules:='';
   FPCupManager.IncludeModules:='';
   FPCupManager.SkipModules:='';
-  FPCupManager.CrossCPU_Target:='';
-  FPCupManager.CrossOS_Target:='';
-  FPCupManager.CrossOS_SubArch:='';
-  FPCupManager.CrossLCL_Platform:='';
+  FPCupManager.CrossCPU_Target:=TCPU.cpuNone;
+  FPCupManager.CrossOS_Target:=TOS.osNone;
+  FPCupManager.CrossOS_SubArch:=TSubarch.saNone;
 
+  FPCupManager.LCL_Platform:='';
+
+  FPCupManager.SolarisOI:=false;
   FPCupManager.MUSL:=false;
 
-  FPCupManager.FPCOPT:=Form2.FPCOptions;;
+  FPCupManager.FPCOPT:=Form2.FPCOptions;
   FPCupManager.CrossOPT:='';
 
   FPCupManager.CrossLibraryDirectory:='';
@@ -3030,13 +3768,10 @@ begin
 
   {$IFDEF DEBUG}
   FPCupManager.Verbose:=True;
-  SetVerbosity(True);
   {$ELSE}
-  FPCupManager.Verbose:=True;
-  SetVerbosity((Form2.ExtraVerbose) AND (FPCupManager.Verbose));
+  FPCupManager.Verbose:=Form2.ExtraVerbose;
   {$ENDIF}
 
-  // set default values for FPC and Lazarus URL ... can still be changed inside the quick real run button onclicks
   FPCupManager.FPCURL:=FPCTarget;
   FPCupManager.LazarusURL:=LazarusTarget;
 
@@ -3049,7 +3784,7 @@ begin
   FPCupManager.SwitchURL:=Form2.AutoSwitchURL;
 
   // set custom FPC compiler by special user input through setup+
-  FPCupManager.CompilerOverride:=Form2.GetCompiler(GetTargetCPU,GetTargetOS);
+  FPCupManager.CompilerOverride:=Form2.GetCompiler(GetTCPU(GetTargetCPU),GetTOS(GetTargetOS),TSUBARCH.saNone);
 
   sInstallDir:=ExcludeTrailingPathDelimiter(sInstallDir);
   FPCupManager.BaseDirectory:=sInstallDir;
@@ -3060,13 +3795,10 @@ begin
 
   FPCupManager.ShortCutNameLazarus:='Lazarus_'+ExtractFileName(sInstallDir);
 
-  sInstallDir:=sInstallDir+DirectorySeparator;
+  sInstallDir:=IncludeTrailingPathDelimiter(sInstallDir);
 
-  {$IFDEF MSWINDOWS}
   FPCupManager.MakeDirectory:=sInstallDir+'fpcbootstrap';
-  {$ELSE}
-  FPCupManager.MakeDirectory:='';
-  {$ENDIF MSWINDOWS}
+
   FPCupManager.BootstrapCompilerDirectory:=sInstallDir+'fpcbootstrap';
 
   FPCupManager.FPCInstallDirectory:=sInstallDir+'fpc';
@@ -3074,16 +3806,12 @@ begin
      then FPCupManager.FPCSourceDirectory:=FPCupManager.FPCInstallDirectory+'src'
      else FPCupManager.FPCSourceDirectory:=FPCupManager.FPCInstallDirectory;
 
-  FPCupManager.LazarusDirectory:=sInstallDir+'lazarus';
-
-  {
-  // not yet
+  FPCupManager.LazarusInstallDirectory:=sInstallDir+'lazarus';
   if Form2.SplitLazarus
      then FPCupManager.LazarusSourceDirectory:=FPCupManager.LazarusInstallDirectory+'src'
      else FPCupManager.LazarusSourceDirectory:=FPCupManager.LazarusInstallDirectory;
-  }
 
-  FPCupManager.LazarusPrimaryConfigPath:=sInstallDir+'config_'+ExtractFileName(FPCupManager.LazarusDirectory);
+  FPCupManager.LazarusPrimaryConfigPath:=sInstallDir+'config_'+ExtractFileName(FPCupManager.LazarusInstallDirectory);
 
   FPCupManager.ExportOnly:=(NOT Form2.Repo);
 
@@ -3091,26 +3819,22 @@ begin
   FPCupManager.LazarusPatches:=Form2.LazPatches;
   FPCupManager.NativeFPCBootstrapCompiler:=(NOT Form2.FpcupBootstrappersOnly);
   FPCupManager.ForceLocalRepoClient:=Form2.ForceLocalRepoClient;
+  FPCupManager.Context:=Form2.AddContext;
 
-  // Set default LCL platforms
+  // Set default Darwin LCL platforms
   {$ifdef Darwin}
+    FPCupManager.LCL_Platform:='cocoa';
     {$ifdef LCLCARBON}
-      FPCupManager.CrossLCL_Platform:='carbon';
-    {$endif}
-    {$ifdef LCLCOCOA}
-      FPCupManager.CrossLCL_Platform:='cocoa';
-    {$endif}
-    {$ifdef CPU64}
-      {$ifndef LCLQT5}
-        FPCupManager.CrossLCL_Platform:='cocoa';
-      {$endif}
+      FPCupManager.LCL_Platform:='carbon';
     {$endif}
   {$endif}
+
+  // Override default LCL platforms in case of QT[5]
   {$ifdef LCLQT}
-    FPCupManager.CrossLCL_Platform:='qt';
+    FPCupManager.LCL_Platform:='qt';
   {$endif}
   {$ifdef LCLQT5}
-    FPCupManager.CrossLCL_Platform:='qt5';
+    FPCupManager.LCL_Platform:='qt5';
   {$endif}
 
   {$ifdef RemoteLog}
@@ -3126,10 +3850,6 @@ begin
   StatusMessage.Text:=sStatus;
 
   if CheckAutoClear.Checked then memoSummary.Lines.Clear;
-
-  AddMessage(Self.Caption);
-  AddMessage('');
-
 end;
 
 function TForm1.RealRun:boolean;
@@ -3139,6 +3859,7 @@ var
   {$endif}
   s:string;
   aLazarusVersion:word;
+  aRecordNumber:PtrUInt;
 begin
   result:=false;
 
@@ -3146,10 +3867,11 @@ begin
 
   AddMessage('FPCUP(deluxe) is starting up.');
   AddMessage('');
+  AddMessage('FPCupdeluxe basedir:       '+FPCupManager.BaseDirectory);
   {$IFDEF MSWINDOWS}
-  AddMessage('Binutils/make dir:     '+FPCupManager.MakeDirectory);
+  AddMessage('Binutils dir:              '+FPCupManager.MakeDirectory);
   {$ENDIF MSWINDOWS}
-  AddMessage('Bootstrap dir:         '+FPCupManager.BootstrapCompilerDirectory);
+  AddMessage('Bootstrap dir:             '+FPCupManager.BootstrapCompilerDirectory);
 
   {$IF (defined(BSD)) and (not defined(Darwin))}
   FPCupManager.FPCOpt:=FPCupManager.FPCOpt+' -Fl/usr/local/lib -Fl/usr/pkg/lib';
@@ -3168,6 +3890,7 @@ begin
   //if (Pos('github.com/newpascal',LazarusTarget)>0) then FPCupManager.LazarusDesiredBranch:='lazarus';
   if (Pos('github.com/LongDirtyAnimAlf',FPCTarget)>0) then FPCupManager.FPCDesiredBranch:='master';
   if (Pos('github.com/LongDirtyAnimAlf',LazarusTarget)>0) then FPCupManager.LazarusDesiredBranch:='upstream';
+  if (Pos('github.com/LongDirtyAnimAlf/lazarussource',LazarusTarget)>0) then FPCupManager.LazarusDesiredBranch:='master';
 
   // branch and revision overrides from setup+
   s:=Form2.FPCBranch;
@@ -3181,40 +3904,47 @@ begin
   if Length(s)>0 then FPCupManager.LazarusDesiredRevision:=s;
 
   // overrides for old versions of Lazarus
-  aLazarusVersion:=GetNumericalVersion(LazarusTarget);
+  aLazarusVersion:=CalculateNumericalVersion(LazarusTarget);
   if (aLazarusVersion<>0) AND (aLazarusVersion<CalculateFullVersion(1,0,0)) then
   begin
     s:=FPCupManager.OnlyModules;
     if (Length(s)>0) then
     begin
-      if Pos('oldlazarus',s)=0 then s:=StringReplace(s,'lazarus','oldlazarus',[]);
-      s:=StringReplace(s,'FPCCrossWin32-64','',[]);
-      s:=StringReplace(s,'LazarusCrossWin32-64','',[]);
+      if Pos(_LAZARUSSIMPLE,s)=0 then s:=StringReplace(s,_LAZARUS,_LAZARUSSIMPLE,[]);
+      {$ifdef mswindows}
+      {$ifdef win32}
+      s:=StringReplace(s,_FPC+_CROSSWIN,'',[]);
+      s:=StringReplace(s,_LAZARUS+_CROSSWIN,'',[]);
+      {$endif}
+      {$endif}
       FPCupManager.OnlyModules:=s;
     end
     else
     begin
-      FPCupManager.OnlyModules:='fpc,oldlazarus';
+      FPCupManager.OnlyModules:=_FPC+','+_LAZARUSSIMPLE;
     end;
     AddMessage('Detected a very old version of Lazarus !');
     AddMessage('Switching towards old lazarus sequence !!');
   end;
 
-  AddMessage('FPC URL:               '+FPCupManager.FPCURL);
-  AddMessage('FPC options:           '+FPCupManager.FPCOPT);
-  AddMessage('FPC source directory:  '+FPCupManager.FPCSourceDirectory);
-  AddMessage('FPC install directory: '+FPCupManager.FPCInstallDirectory);
+  AddMessage('');
 
-  AddMessage('Lazarus URL:           '+FPCupManager.LazarusURL);
-  AddMessage('Lazarus options:       '+FPCupManager.LazarusOPT);
-  AddMessage('Lazarus directory:     '+FPCupManager.LazarusDirectory);
+  AddMessage('FPC URL:                   '+FPCupManager.FPCURL);
+  AddMessage('FPC source directory:      '+FPCupManager.FPCSourceDirectory);
+  AddMessage('FPC install directory:     '+FPCupManager.FPCInstallDirectory);
+  AddMessage('FPC options:               '+FPCupManager.FPCOPT);
+
+  AddMessage('');
+
+  AddMessage('Lazarus URL:               '+FPCupManager.LazarusURL);
+  AddMessage('Lazarus source directory:  '+FPCupManager.LazarusSourceDirectory);
+  AddMessage('Lazarus install directory: '+FPCupManager.LazarusInstallDirectory);
+  AddMessage('Lazarus options:           '+FPCupManager.LazarusOPT);
 
   AddMessage('');
   AddMessage('Please stand back and enjoy !');
   AddMessage('');
 
-  //create install directory
-  if (NOT DirectoryExists(FPCupManager.BaseDirectory)) then ForceDirectories(FPCupManager.BaseDirectory);
   //save install settings in install directory
   SetFPCUPSettings(IncludeTrailingPathDelimiter(FPCupManager.BaseDirectory));
 
@@ -3232,7 +3962,9 @@ begin
   aDataClient.UpInfo.UpInstallDir:=FPCupManager.BaseDirectory;
   {$endif}
 
-  sleep(1000);
+  AddMessage(DateTimeToStr(now)+': '+BeginSnippet+' V'+RevisionStr+' ('+VersionDate+') started.');
+  AddMessage('FPCUPdeluxe V'+DELUXEVERSION+' for '+GetTargetCPUOS+' running on '+GetDistro);
+  AddMessage('');
 
   try
     result:=FPCupManager.Run;
@@ -3249,8 +3981,9 @@ begin
         if (NOT MissingTools) then
         begin
           StatusMessage.Text:='Hmmm, something went wrong ... have a good look at the command screen !';
+          AddMessage(FPCupManager.RunInfo);
           {$ifdef RemoteLog}
-          aDataClient.UpInfo.LogEntry:=memoSummary.Text;
+          aDataClient.UpInfo.LogEntry:=memoSummary.Text+LineEnding+FPCupManager.RunInfo;
           aDataClient.SendData;
           {$endif}
         end
@@ -3290,7 +4023,12 @@ begin
 
       {$ifdef RemoteLog}
       aDataClient.UpInfo.LogEntry:='Success !';
-      aDataClient.SendData;
+      aRecordNumber:=aDataClient.SendData;
+      if (aRecordNumber>0) then
+      begin
+        //AddMessage('SUCCESS ! Info has been send to fpcupdeluxe logger.');
+        //AddMessage('');
+      end;
       {$endif}
 
     end;
@@ -3308,7 +4046,7 @@ end;
 function TForm1.GetFPCUPSettings(IniDirectory:string):boolean;
 var
   aTarget,aURL:string;
-  aIndex:integer;
+  Cores,MemAvailable,SwapAvailable:DWord;
 begin
   result:=FileExists(IniDirectory+installerUniversal.DELUXEFILENAME);
 
@@ -3318,14 +4056,57 @@ begin
   AddMessage(Self.Caption);
   {$ifndef NetBSD}
   AddMessage('Running on '+GetDistro);
+  {$ifdef FreeBSD}
+  AddMessage('Detected mayor FreeBSD version '+InttoStr(GetFreeBSDVersion));
+  {$endif FreeBSD}
+  {$endif NetBSD}
+
+  {$IFDEF LINUX}
+  if IsLinuxMUSL then AddMessage('Seems we are running on a MUSL Linux.');
+  {$ENDIF LINUX}
+
+  {$ifdef LCLQT5}
+  if LibWhich(LIBQT5) then
+    AddMessage('Found system wide libQt5Pas.so and that will be used.')
+  else
+    AddMessage('No system wide libQt5Pas.so found. Some QT5 trickery will be used');
   {$endif}
+
+  Cores:=GetLogicalCpuCount;
+  if Cores<>0 then AddMessage('CPU cores used: '+InttoStr(Cores));
+
+  MemAvailable:=GetTotalPhysicalMemory;
+  if (MemAvailable<>0) then AddMessage('Available physical memory: '+InttoStr(MemAvailable)+' MB');
+
+  SwapAvailable:=GetSwapFileSize;
+
+  {$IFDEF LINUX}
+  AddMessage('Available swap: '+InttoStr(SwapAvailable)+' MB');
+  {$ENDIF}
+
+  MemAvailable:=MemAvailable+SwapAvailable;
+
+  if (MemAvailable<>0) AND (MemAvailable<1500) then
+  begin
+    AddMessage('Please be warned: memory is very limited for building Lazarus');
+    {$IFDEF UNIX}
+    AddMessage('Memory advice: Please add (more) swap space !!');
+    AddMessage('Memory advice: To build Lazarus, you will need (at least) 1GB of (swap-)RAM space.');
+    memoSummary.Lines.Append(BeginSnippet+' Most likely, there will not enough RAM (swap) to build Lazarus.');
+    memoSummary.Lines.Append(BeginSnippet+' Expected error: Can''t call the assembler');
+    memoSummary.Lines.Append(BeginSnippet+' Expected error:  Can''t call the resource compiler');
+    memoSummary.Lines.Append(BeginSnippet+' Please add some RAM or swap-space (+1GB) and re-run fpcupdeluxe.');
+    {$ENDIF UNIX}
+  end;
+
   AddMessage('');
 
   if result then
   begin
     with TIniFile.Create(IniDirectory+installerUniversal.DELUXEFILENAME) do
     try
-
+      AddMessage('Current install drectory: '+sInstallDir);
+      AddMessage('');
       AddMessage('Got settings from install directory');
       AddMessage('');
 
@@ -3334,13 +4115,18 @@ begin
 
       FPCupManager.ExportOnly:=(NOT ReadBool('General','GetRepo',True));
 
+      //Default FPC target
+
       aTarget:='stable';
       {$ifdef CPUAARCH64}
-      aTarget:='trunk';
+      aTarget:='fixes';
       {$endif}
       {$IF DEFINED(CPUPOWERPC64) AND DEFINED(FPC_ABI_ELFV2)}
-      aTarget:='trunk';
+      aTarget:='fixes';
       {$ENDIF}
+      {$ifdef Haiku}
+      aTarget:='stable.git';
+      {$endif}
 
       aURL:=installerUniversal.GetAlias('fpcURL',aTarget);
       aURL:=ReadString('URL','fpcURL',aURL);
@@ -3348,12 +4134,26 @@ begin
       if Pos('http://svn.freepascal.org',aURL)>0 then aURL:=StringReplace(aURL,'http://','https://',[rfIgnoreCase]);
       aURL:=ExcludeTrailingPathDelimiter(aURL);
       FPCTarget:=aURL;
+
+
+      //Default Lazarus target
+
       {$ifdef LCLQT5}
-      aTarget:='trunk';
+      aTarget:='fixes';
       {$endif}
       {$ifdef LCLCOCOA}
-      aTarget:='trunk';
+      aTarget:='fixes';
       {$endif}
+
+      {$ifdef Haiku}
+      {$ifdef CPUX86}
+      aTarget:='stable.git';
+      {$endif}
+      {$ifdef CPUX86_64}
+      aTarget:='trunk.git';
+      {$endif}
+      {$endif}
+
       aURL:=installerUniversal.GetAlias('lazURL',aTarget);
       aURL:=ReadString('URL','lazURL',aURL);
       // correct for [unsafe] URL in old fpcup.ini
@@ -3361,28 +4161,31 @@ begin
       aURL:=ExcludeTrailingPathDelimiter(aURL);
       LazarusTarget:=aURL;
 
-
       radgrpCPU.ItemIndex:=ReadInteger('Cross','CPUTarget',radgrpCPU.ItemIndex);
       radgrpOS.ItemIndex:=ReadInteger('Cross','OSTarget',radgrpOS.ItemIndex);
 
       if (listModules.Items.Count>0) then listModules.ItemIndex:=ReadInteger('General','Module',listModules.ItemIndex);
 
-      Form2.FPCOptions:=ReadString('General','FPCOptions','');
+      Form2.FPCOptions:=ReadString('General','FPCOptions',Form2.FPCOptions);
       Form2.LazarusOptions:=ReadString('General','LazarusOptions','');
       Form2.FPCRevision:=ReadString('General','FPCRevision','');
       Form2.LazarusRevision:=ReadString('General','LazarusRevision','');
       Form2.FPCBranch:=ReadString('General','FPCBranch','');
       Form2.LazarusBranch:=ReadString('General','LazarusBranch','');
 
-      Form2.SplitFPC:=ReadBool('General','SplitFPC',True);
-      Form2.SplitLazarus:=ReadBool('General','SplitLazarus',False);
+      Form2.SplitFPC:=ReadBool('General','SplitFPC',Form2.SplitFPC);
+      Form2.SplitLazarus:=ReadBool('General','SplitLazarus',Form2.SplitLazarus);
 
-      Form2.UseWget:=ReadBool('General','UseWget',False);
-      Form2.MakeJobs:=ReadBool('General','MakeJobs',True);
-
-      Form2.SystemFPC:=ReadBool('General','SystemFPC',False);
+      Form2.UseWget:=ReadBool('General','UseWget',Form2.UseWget);
+      Form2.MakeJobs:=ReadBool('General','MakeJobs',Form2.MakeJobs);
 
       Form2.ExtraVerbose:=ReadBool('General','ExtraVerbose',False);
+      Form2.UpdateOnly:=ReadBool('General','UpdateOnly',False);
+
+      Form2.UseSoftFloat:=ReadBool('General','UseSoftFloat',Form2.UseSoftFloat);
+      Form2.OnlinePatching:=ReadBool('General','OnlinePatching',Form2.OnlinePatching);
+
+      Form2.SystemFPC:=ReadBool('General','SystemFPC',False);
 
       Form2.FPCPatches:=ReadString('Patches','FPCPatches','');
       Form2.LazPatches:=ReadString('Patches','LazarusPatches','');
@@ -3391,32 +4194,47 @@ begin
 
       Form2.FpcupBootstrappersOnly:=ReadBool('General','FpcupBootstrappersOnly',False);
 
-      Form2.ForceLocalRepoClient:=ReadBool('General','ForceLocalRepoClient',False);
+      Form2.ForceLocalRepoClient:=ReadBool('General','ForceLocalRepoClient',Form2.ForceLocalRepoClient);
 
     finally
       Free;
     end;
+
+    AddMessage('');
 
     Form2.SetInstallDir(IniDirectory);
 
     {$ifdef usealternateui}
     alternateui_update_interface_buttons;
     {$endif}
+  end
+  else
+  begin
+    AddMessage('Current install drectory: '+sInstallDir);
+    {$ifdef Solaris}
+    // current trunk does not build with the standard -O2, so use -O1 for all
+    Form2.FPCOptions:='-g -gl -O1';
+    FPCupManager.FPCOPT:=Form2.FPCOptions;
+    {$endif}
   end;
 end;
 
 function TForm1.SetFPCUPSettings(IniDirectory:string):boolean;
+var
+  aDir:string;
 begin
   result:=false;
 
   if NOT Assigned(FPCupManager) then exit;
   if NOT Assigned(Form2) then exit;
 
-  result:=DirectoryExists(ExtractFileDir(IniDirectory+installerUniversal.DELUXEFILENAME));
-  if not result then exit;
+  aDir:=ExtractFileDir(IncludeTrailingPathDelimiter(IniDirectory)+installerUniversal.DELUXEFILENAME);
+  result:=DirectoryExists(aDir);
+
+  if (NOT result) then exit;
 
   try
-    with TIniFile.Create(IniDirectory+installerUniversal.DELUXEFILENAME) do
+    with TMemIniFile.Create(aDir+DirectorySeparator+installerUniversal.DELUXEFILENAME) do
     try
       // mmm, is this correct ?  See extrasettings !!
       WriteBool('General','GetRepo',(NOT FPCupManager.ExportOnly));
@@ -3444,6 +4262,9 @@ begin
       WriteBool('General','UseWget',Form2.UseWget);
       WriteBool('General','MakeJobs',Form2.MakeJobs);
       WriteBool('General','ExtraVerbose',Form2.ExtraVerbose);
+      WriteBool('General','UpdateOnly',Form2.UpdateOnly);
+      WriteBool('General','UseSoftFloat',Form2.UseSoftFloat);
+      WriteBool('General','OnlinePatching',Form2.OnlinePatching);
 
       WriteString('Patches','FPCPatches',Form2.FPCPatches);
       WriteString('Patches','LazarusPatches',Form2.LazPatches);
@@ -3454,6 +4275,7 @@ begin
 
       WriteBool('General','ForceLocalRepoClient',Form2.ForceLocalRepoClient);
 
+      UpdateFile;
     finally
       Free;
     end;
@@ -3463,25 +4285,34 @@ begin
   except
     on E: Exception do
     begin
-      //infoln(installerUniversal.DELUXEFILENAME+': File creation error: '+E.Message,etError);
+      //Infoln(installerUniversal.DELUXEFILENAME+': File creation error: '+E.Message,etError);
     end;
   end;
 
 end;
 
 procedure TForm1.AddMessage(const aMessage:string; const UpdateStatus:boolean=false);
+var
+  aMessageStrings:TStrings;
 begin
-  {$IF DEFINED(FPC_FULLVERSION) AND (FPC_FULLVERSION > 30000)}
-  CommandOutputScreen.Append(aMessage);
-  {$ELSE}
-  CommandOutputScreen.Lines.Append(aMessage);
-  {$ENDIF}
+  if Length(aMessage)=0 then
+    CommandOutputScreen.Lines.Append('')
+  else
+  begin
+    aMessageStrings:=TStringList.Create;
+    try
+      aMessageStrings.Text:=aMessage;
+      CommandOutputScreen.Lines.AddStrings(aMessageStrings);
+      if UpdateStatus then StatusMessage.Text:=aMessageStrings[0];
+    finally
+      aMessageStrings.Free;
+    end;
+  end;
   CommandOutputScreen.CaretX:=0;
   CommandOutputScreen.CaretY:=CommandOutputScreen.Lines.Count;
-  if UpdateStatus then StatusMessage.Text:=aMessage;
   {$ifdef usealternateui}
   alternateui_AddMessage(amessage,updatestatus);
-  {$endif}  
+  {$endif}
   Application.ProcessMessages;
 end;
 
@@ -3528,7 +4359,7 @@ begin
 
   if Length(aLocalTarget)=0 then exit;
 
-  if pos('://',aLocalTarget)=0 then
+  if Pos('://',aLocalTarget)=0 then
   begin
     // translate keyword into a real URL
     if aEdit=RealFPCURL then aLocalTarget:=installerUniversal.GetAlias('fpcURL',aLocalTarget);
@@ -3578,16 +4409,46 @@ begin
   end;
 end;
 
-procedure TForm1.InitFpcupdeluxe(Data: PtrInt);
-{$ifdef RemoteLog}
+procedure TForm1.ButtonSubarchSelectClick(Sender: TObject);
 var
-  aModalResult:TModalResult;
-{$endif}
+  i:integer;
+  s:string;
 begin
-  // FPC cross-quirck : GetDistro (ExecuteCommand) gives errors if used in CreateForm
-  {$ifdef RemoteLog}
-  aDataClient.UpInfo.UpDistro:=GetDistro;
-  {$endif}
+  if radgrpCPU.ItemIndex<>-1 then
+  begin
+    s:=radgrpCPU.Items[radgrpCPU.ItemIndex];
+    FPCupManager.CrossCPU_Target:=GetTCPU(s);
+  end;
+
+  if radgrpOS.ItemIndex<>-1 then
+  begin
+    s:=radgrpOS.Items[radgrpOS.ItemIndex];
+    FPCupManager.CrossOS_Target:=GetTOS(s);
+  end;
+
+  SubarchForm.SetCrossTarget(FPCupManager,FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target);
+
+  SubarchForm.ShowModal;
+
+  if SubarchForm.ModalResult=mrOk then
+  begin
+    AddMessage('Fpcupdeluxe: selected subarch = '+GetSubarch(SubarchForm.GetSelectedSubArch(FPCupManager.CrossCPU_Target,FPCupManager.CrossOS_Target)));
+  end;
+end;
+
+procedure TForm1.HandleInfo(var Msg: TLMessage);
+var
+  MsgStr: PChar;
+  MsgPasStr: string;
+begin
+  MsgStr := {%H-}PChar(Msg.wparam);
+  MsgPasStr := StrPas(MsgStr);
+  CommandOutputScreen.SetFiltered(MsgPasStr);
+  StrDispose(MsgStr)
+end;
+
+procedure TForm1.InitFpcupdeluxe(Data: PtrInt);
+begin
   InitFPCupManager;
   {$ifdef EnableLanguages}
   TransLate(sLanguage);
@@ -3596,12 +4457,17 @@ begin
   // This must only be called once.
   If Not Alternate_ui_created then alternateui_Create_Controls;
   {$endif}
-  {$ifdef RemoteLog}
+  if Form2.GetUpdates then Application.QueueAsyncCall(@CheckForUpdates,0);
+end;
+
+{$ifdef RemoteLog}
+procedure TForm1.InitConsent(Data: PtrInt);
+var
+  aModalResult:TModalResult;
+begin
+  aDataClient.UpInfo.UpDistro:=GetDistro;
   if (sConsentWarning) OR (Form2.SendInfo) then
   begin
-    AddMessage('Fpcupdeluxe logging info:');
-    AddMessage('http://fpcuplogger.batterybutcher.com:8880/root/getinfohtml',true);
-    AddMessage('http://fpcuplogger.batterybutcher.com:8880/root/getinfohtml?ShowErrors=yes');
     if (sConsentWarning) then
     begin
       aModalResult:=(MessageDlg(
@@ -3619,9 +4485,16 @@ begin
          else Form2.SendInfo:=False;
     end;
   end;
-  {$endif}
-  if Form2.GetUpdates then Application.QueueAsyncCall(@CheckForUpdates,0);
+
+  if (Form2.SendInfo) then
+  begin
+    AddMessage('Fpcupdeluxe logging info:');
+    AddMessage('fpcuplogger.batterybutcher.com/root/getinfohtml',true);
+    AddMessage('fpcuplogger.batterybutcher.com/root/getinfohtml?ShowErrors=yes');
+  end;
+
 end;
+{$endif}
 
 procedure TForm1.CheckForUpdates(Data: PtrInt);
 var
@@ -3637,6 +4510,17 @@ begin
     memoSummary.Lines.Append(upUpdateFound);
   end else AddMessage(upUpdateNotFound);
 end;
+
+function TForm1.GetCmdFontSize:integer;
+begin
+  result:=CommandOutputScreen.Font.Size;
+end;
+
+procedure TForm1.SetCmdFontSize(aValue:integer);
+begin
+  CommandOutputScreen.Font.Size:=aValue;
+end;
+
 
 end.
 

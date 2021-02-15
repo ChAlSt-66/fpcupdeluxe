@@ -62,13 +62,13 @@ interface
 {$IFDEF MSWINDOWS}
 // for now, keep this Windows-only (should still run on Wine)
 uses
-  Classes, SysUtils, installerCore,registry {Requires LCL}, fpcuputil;
+  Classes, SysUtils, Registry, installerCore;
 
 type
 
   { TWinInstaller }
 
-  TWinInstaller = class(TInstaller)
+  TWinInstaller = class(TBaseWinInstaller)
   private
     FFPCBuildDir: string; //Location of fpcbuild sources
     FFPCDir: string; //Location of FPC sources
@@ -98,9 +98,10 @@ type
 {$ENDIF MSWINDOWS}
 
 implementation
+
 {$IFDEF MSWINDOWS}
 uses
-  FileUtil;
+  fpcuputil;
 
 const
   ClassName = 'TWinInstaller';
@@ -138,7 +139,7 @@ begin
     if CompileCommand<>'' then
       CompileCommand:=StringReplace(UpperCase(CompileCommand),'COMPIL32','ISCC',[rfReplaceAll]);
     if (CompileCommand='') then
-      CompileCommand:=FindDefaultExecutablePath('Compil32.exe');
+      CompileCommand:=Which('Compil32.exe');
     if (CompileCommand='') and (FileExists(ProgramFiles+'\Inno Setup 5\'+CommandLineCompiler)) then
       CompileCommand:=ProgramFiles+'\Inno Setup 5\'+CommandLineCompiler;
     if (CompileCommand='') and (FileExists(ProgramFilesx86+'\Inno Setup 5\'+CommandLineCompiler)) then
@@ -158,12 +159,7 @@ var
   InstallerBatchDir: string; //directory where installer batch script is; will contain log and output dir with installer
 begin
   // todo: split up, move to config, perhaps make dirs properties etc
-  if FVerbose then
-    Processor.OnOutputM:=@DumpOutput;
-  FSVNClient.ModuleName:=ModuleName;
-  FSVNClient.Verbose:=FVerbose;
-  FSVNClient.ExportOnly:=FExportOnly;
-  infoln('TWinInstaller: creating Lazarus installer. This may take a while...',etInfo);
+  Infoln('TWinInstaller: creating Lazarus installer. This may take a while...',etInfo);
 
   // Basedirectory = install directory from fpcup.ini/universal module.
   // We use it to put SVN repos needed for building.
@@ -177,7 +173,7 @@ begin
   //checkout fpc build sources svn checkout
   //This repository includes the full FPC sources as well...
   if FVerbose then WritelnLog(ClassName+': Getting FPC build repository',true);
-  ForceDirectories(FFPCBuildDir);
+  ForceDirectoriesSafe(FFPCBuildDir);
   FSVNClient.LocalRepository:=FFPCBuildDir;
   // Using the fixes version of FPC hardcoded; probably we officially need latest stable FPC...
   //todo: perhaps link this to the actual version of FPC used in the regular install?
@@ -186,18 +182,18 @@ begin
 
   //checkout laz binaries
   if FVerbose then WritelnLog(ClassName+': Getting Lazarus binaries repository',true);
-  ForceDirectories(FLazarusBinaryDir);
+  ForceDirectoriesSafe(FLazarusBinaryDir);
   FSVNClient.LocalRepository:=FLazarusBinaryDir;
   // Will have at least i386, x64 and arm-wince subfolders
   FSVNClient.Repository:='http://svn.freepascal.org/svn/lazarus/binaries/';
   FSVNClient.CheckOutOrUpdate;
 
   // Lazbuilddir may not exist (or should be empty) - so if it is there, remove it
-  FInstallerBuildDir:=IncludeTrailingPathDelimiter(GetTempDir(false))+'lazinstaller';
+  FInstallerBuildDir:=IncludeTrailingPathDelimiter(GetTempDirName)+'lazinstaller';
   if DirectoryExists(FInstallerBuildDir) then
   begin
-    infoln('Deleting temporary Lazarus installer build directory '+FInstallerBuildDir+' before running installer creator.',etInfo);
-    DeleteDirectory(FInstallerBuildDir,false);
+    Infoln('Deleting temporary Lazarus installer build directory '+FInstallerBuildDir+' before running installer creator.',etInfo);
+    DeleteDirectoryEx(FInstallerBuildDir);
   end;
 
   //Basically a copy from the help installer - without trailing delimiter
@@ -231,23 +227,22 @@ begin
   }
   Processor.Executable := IncludeTrailingPathDelimiter(InstallerBatchDir)+'create_installer.bat';
   // MUST be set to create_installer.bat otherwise it can't find the fpcbuild/lazbuild scripts
-  Processor.CurrentDirectory:=IncludeTrailingPathDelimiter(InstallerBatchDir);
-  Processor.Parameters.Clear;
-  Processor.Parameters.Add(ExcludeTrailingPathDelimiter(FFPCBuildDir)); //FPCSVNDIR
-  Processor.Parameters.Add(ExcludeTrailingPathDelimiter(FLazarusDir)); //LAZSVNDIR
-  Processor.Parameters.Add(ExcludeTrailingPathDelimiter(FLazarusBinaryDir)); //LAZSVNBINDIR
+  Processor.Process.CurrentDirectory:=IncludeTrailingPathDelimiter(InstallerBatchDir);
+  Processor.Process.Parameters.Clear;
+  Processor.Process.Parameters.Add(ExcludeTrailingPathDelimiter(FFPCBuildDir)); //FPCSVNDIR
+  Processor.Process.Parameters.Add(ExcludeTrailingPathDelimiter(FLazarusDir)); //LAZSVNDIR
+  Processor.Process.Parameters.Add(ExcludeTrailingPathDelimiter(FLazarusBinaryDir)); //LAZSVNBINDIR
   // Should officially be a bootstrap compiler but should work with current compiler:
-  Processor.Parameters.Add(FCompiler); //RELEASE_PPC
-  Processor.Parameters.Add('""'); //an empty parameter as IDE_WIDGETSET
-  Processor.Parameters.Add('""'); //an empty parameter as PATCHFILE
-  Processor.Parameters.Add(ExcludeTrailingPathDelimiter(HelpFileDir)); //CHMHELPFILES
+  Processor.Process.Parameters.Add(FCompiler); //RELEASE_PPC
+  Processor.Process.Parameters.Add('""'); //an empty parameter as IDE_WIDGETSET
+  Processor.Process.Parameters.Add('""'); //an empty parameter as PATCHFILE
+  Processor.Process.Parameters.Add(ExcludeTrailingPathDelimiter(HelpFileDir)); //CHMHELPFILES
   if FVerbose then WritelnLog(ClassName+': Running '+Processor.Executable,true);
-  Processor.Execute;
-
-  if Processor.ExitStatus <> 0 then
+  ProcessorResult:=Processor.ExecuteAndWait;
+  if (ProcessorResult <> 0) then
   begin
     result := False;
-    WritelnLog(ClassName+': Failed to create installer; '+Processor.Executable+' returned '+IntToStr(Processor.ExitStatus)+LineEnding+
+    WritelnLog(ClassName+': Failed to create installer; '+Processor.Executable+' returned '+IntToStr(ProcessorResult)+LineEnding+
       'Installer log at '+IncludeTrailingPathDelimiter(InstallerBatchDir)+'installer.log',true);
   end
   else
@@ -255,7 +250,7 @@ begin
     // Batch file ended, but no idea if it actually was succesful because it does not return result codes.
     // So removing the log
     //DeleteFile(IncludeTrailingPathDelimiter(InstallerBatchDir)+'installer.log');
-    infoln('TWinInstaller: finished running the installer creator. If it worked, the installer is in '+IncludeTrailingPathDelimiter(InstallerBatchDir)+'output',etInfo);
+    Infoln('TWinInstaller: finished running the installer creator. If it worked, the installer is in '+IncludeTrailingPathDelimiter(InstallerBatchDir)+'output',etInfo);
     result := True;
   end;
 end;
